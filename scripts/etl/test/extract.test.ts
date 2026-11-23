@@ -1,18 +1,18 @@
 import assert from 'node:assert/strict';
 import { describe, it } from 'node:test';
 import {
-  buildPositionDataset,
-  classifyStyle,
-  deterministicShuffle,
-  parseCliArgs,
-  pickLatestLichessUrl,
-} from '../src/extract.js';
-import {
   calculateMaterial,
   classifyBucket,
   extractCandidatesFromGame,
   isTrivialFreeCapture,
-} from '../src/filter.js';
+} from '../src/candidateFilter.js';
+import { parseCliArgs } from '../src/cli.js';
+import {
+  buildPositionDataset,
+  classifyStyle,
+  deterministicShuffle,
+} from '../src/datasetBuilder.js';
+import { pickLatestLichessUrl } from '../src/extract.js';
 import {
   extractEvalFromComment,
   normalizeEvalForSide,
@@ -26,7 +26,7 @@ import {
   computePvGap,
   parseUciInfoLine,
   type UciInfoLine,
-} from '../src/stockfish.js';
+} from '../src/uciParser.js';
 import type { Position } from '../../../shared/types.js';
 
 const RUY_LOPEZ_MOVES = [

@@ -1,79 +1,55 @@
+/**
+ * Practice mode difficulty tabs (5/day per tier) and compact lifetime accuracy/error stats bar.
+ */
 import { Check } from 'lucide-react';
-import type { DifficultyTier, PracticeStats } from '../types';
+import { ALL_TIERS, TIER_CONFIG } from '../config/constants';
+import type { DifficultyTier, PracticeStats, TierProgressSummary } from '../types';
 
-export interface TierProgressSummary {
-  answered: number;
-  total: number;
-  completed: boolean;
-}
-
-interface PracticeControlsProps {
-  tierFilter: DifficultyTier;
-  onTierFilterChange: (tier: DifficultyTier) => void;
+interface PracticeTabsProps {
+  tier: DifficultyTier;
+  onTierChange: (tier: DifficultyTier) => void;
   progressByTier: Record<DifficultyTier, TierProgressSummary>;
   stats: PracticeStats;
 }
 
-const TIER_OPTIONS: ReadonlyArray<{
-  value: DifficultyTier;
-  label: string;
-  activeClass: string;
-}> = [
-  {
-    value: 1,
-    label: 'Easy',
-    activeClass: 'bg-emerald-500/20 text-emerald-300 ring-1 ring-emerald-400/50',
-  },
-  {
-    value: 2,
-    label: 'Medium',
-    activeClass: 'bg-amber-500/20 text-amber-300 ring-1 ring-amber-400/50',
-  },
-  {
-    value: 3,
-    label: 'Hard',
-    activeClass: 'bg-rose-500/20 text-rose-300 ring-1 ring-rose-400/50',
-  },
-];
-
-export function PracticeControls({
-  tierFilter,
-  onTierFilterChange,
+export function PracticeTabs({
+  tier,
+  onTierChange,
   progressByTier,
   stats,
-}: PracticeControlsProps) {
+}: PracticeTabsProps) {
   const accuracy =
     stats.total > 0 ? Math.round((stats.correct / stats.total) * 100) : null;
 
   return (
     <div className="flex shrink-0 flex-col gap-1.5 px-3 pb-1">
-      {/* Difficulty Tabs with Daily 5-Try Progress */}
       <div
         role="tablist"
         aria-label="Practice difficulty"
         className="grid grid-cols-3 gap-1.5"
       >
-        {TIER_OPTIONS.map((option) => {
-          const active = tierFilter === option.value;
-          const summary = progressByTier[option.value];
+        {ALL_TIERS.map((value) => {
+          const meta = TIER_CONFIG[value];
+          const active = tier === value;
+          const summary = progressByTier[value];
           return (
             <button
-              key={option.value}
+              key={value}
               type="button"
               role="tab"
               aria-selected={active}
-              onClick={() => onTierFilterChange(option.value)}
+              onClick={() => onTierChange(value)}
               className={`flex items-center justify-center gap-1.5 rounded-xl px-2 py-1.5 text-xs font-semibold transition ${
                 active
-                  ? option.activeClass
+                  ? meta.tabActiveClass
                   : 'bg-slate-900/90 text-slate-400 ring-1 ring-slate-800 hover:text-slate-200'
               }`}
             >
-              <span>{option.label}</span>
+              <span>{meta.label}</span>
               {summary.completed ? (
                 <span
                   className="inline-flex h-4 w-4 items-center justify-center rounded-full bg-emerald-500/20 text-emerald-300"
-                  aria-label={`${option.label} completed`}
+                  aria-label={`${meta.label} completed`}
                 >
                   <Check className="h-3 w-3 stroke-[3]" />
                 </span>
@@ -87,7 +63,6 @@ export function PracticeControls({
         })}
       </div>
 
-      {/* Compact Lifetime Stats Bar */}
       <div className="flex items-center justify-between gap-2 rounded-xl bg-slate-900/80 px-2.5 py-1.5 text-[11px] ring-1 ring-slate-800/90">
         <div className="flex items-center gap-2.5">
           <span className="font-semibold text-slate-300">

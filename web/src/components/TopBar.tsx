@@ -1,17 +1,20 @@
+/**
+ * App header with Blundr branding, Daily/Practice mode switcher, and active streak badge.
+ */
 import { Flame } from 'lucide-react';
+import { APP_NAME } from '../config/constants';
 import type { GameMode } from '../types';
 
-interface HeaderProps {
+interface TopBarProps {
   mode: GameMode;
   onModeChange: (mode: GameMode) => void;
   streak: number;
   dailyCompleted: boolean;
 }
 
-export function Header({ mode, onModeChange, streak, dailyCompleted }: HeaderProps) {
+export function TopBar({ mode, onModeChange, streak, dailyCompleted }: TopBarProps) {
   return (
     <header className="flex shrink-0 items-center justify-between gap-2 px-3 pt-2.5 pb-1.5">
-      {/* Compact Brand */}
       <div className="flex items-center gap-2 min-w-0">
         <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg bg-slate-800/90 ring-1 ring-slate-700/80 shadow-sm">
           <img
@@ -23,7 +26,7 @@ export function Header({ mode, onModeChange, streak, dailyCompleted }: HeaderPro
         </div>
         <div className="leading-tight truncate">
           <h1 className="text-sm font-bold tracking-tight text-slate-100 truncate">
-            Blundr
+            {APP_NAME}
           </h1>
           <p className="text-[10px] font-medium text-slate-400 truncate">
             Advantage or Equal?
@@ -31,7 +34,6 @@ export function Header({ mode, onModeChange, streak, dailyCompleted }: HeaderPro
         </div>
       </div>
 
-      {/* Mode Segmented Control */}
       <div
         role="tablist"
         aria-label="Game mode"
@@ -71,7 +73,6 @@ export function Header({ mode, onModeChange, streak, dailyCompleted }: HeaderPro
         </button>
       </div>
 
-      {/* Streak Pill */}
       <div
         className="flex shrink-0 items-center gap-1 rounded-full bg-slate-900/90 px-2.5 py-1 text-xs font-bold ring-1 ring-slate-800"
         title={mode === 'daily' ? 'Daily Streak' : 'Practice Streak'}

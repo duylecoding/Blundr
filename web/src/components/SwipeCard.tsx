@@ -1,13 +1,11 @@
+/**
+ * Interactive swipeable chess card with metadata header, directional stamps, and BoardView.
+ */
 import { useEffect } from 'react';
-import {
-  animate,
-  motion,
-  useMotionValue,
-  useTransform,
-  type PanInfo,
-} from 'framer-motion';
-import type { Position } from '../types';
-import { ChessBoard } from './ChessBoard';
+import { animate, motion, useMotionValue, useTransform, type PanInfo } from 'framer-motion';
+import { SWIPE_CONFIG, TIER_CONFIG } from '../config/constants';
+import type { FeedbackOutcome, Position } from '../types';
+import { BoardView } from './BoardView';
 
 interface SwipeCardProps {
   position: Position;
@@ -15,32 +13,11 @@ interface SwipeCardProps {
   displayLastMove?: [string, string];
   bestMoveArrow?: [string, string] | null;
   disabled: boolean;
-  /** Daily slot label e.g. "1/5", or null in Practice mode */
   slotLabel: string | null;
-  /** Whether to show tier pill (shown in Practice mode) */
   showTier: boolean;
-  /** Highlight border once answered */
-  feedbackOutcome: 'correct' | 'incorrect' | null;
+  feedbackOutcome: FeedbackOutcome;
   onSwipe: (guessedAdvantage: boolean) => void;
 }
-
-const SWIPE_DISTANCE_THRESHOLD = 84;
-const SWIPE_VELOCITY_THRESHOLD = 460;
-
-const TIER_META: Record<1 | 2 | 3, { label: string; className: string }> = {
-  1: {
-    label: 'Easy',
-    className: 'bg-emerald-500/15 text-emerald-300 ring-emerald-500/30',
-  },
-  2: {
-    label: 'Medium',
-    className: 'bg-amber-500/15 text-amber-300 ring-amber-500/30',
-  },
-  3: {
-    label: 'Hard',
-    className: 'bg-rose-500/15 text-rose-300 ring-rose-500/30',
-  },
-};
 
 export function SwipeCard({
   position,
@@ -65,47 +42,28 @@ export function SwipeCard({
   }, [position.id, x]);
 
   useEffect(() => {
-    if (disabled) {
-      animate(x, 0, {
-        type: 'spring',
-        stiffness: 420,
-        damping: 32,
-      });
-    }
+    if (disabled) animate(x, 0, SWIPE_CONFIG.spring);
   }, [disabled, x]);
 
   const handleDragEnd = (_event: MouseEvent | TouchEvent | PointerEvent, info: PanInfo) => {
-    if (disabled) {
-      return;
-    }
+    if (disabled) return;
+    const { distanceThreshold, velocityMinOffset, velocityThreshold, spring } = SWIPE_CONFIG;
     const swipedRight =
-      info.offset.x > SWIPE_DISTANCE_THRESHOLD ||
-      (info.offset.x > 30 && info.velocity.x > SWIPE_VELOCITY_THRESHOLD);
+      info.offset.x > distanceThreshold ||
+      (info.offset.x > velocityMinOffset && info.velocity.x > velocityThreshold);
     const swipedLeft =
-      info.offset.x < -SWIPE_DISTANCE_THRESHOLD ||
-      (info.offset.x < -30 && info.velocity.x < -SWIPE_VELOCITY_THRESHOLD);
+      info.offset.x < -distanceThreshold ||
+      (info.offset.x < -velocityMinOffset && info.velocity.x < -velocityThreshold);
 
-    // Snap smoothly back to center so the player can inspect the board & PV on reveal
-    animate(x, 0, {
-      type: 'spring',
-      stiffness: 420,
-      damping: 32,
-    });
-
-    if (swipedRight) {
-      onSwipe(true);
-    } else if (swipedLeft) {
-      onSwipe(false);
-    }
+    // Recenter immediately so the player can inspect the board and best line after swiping.
+    animate(x, 0, spring);
+    if (swipedRight) onSwipe(true);
+    else if (swipedLeft) onSwipe(false);
   };
 
   const isWhiteToMove = position.sideToMove === 'w';
-  const orientation = isWhiteToMove ? 'white' : 'black';
-  const lastMoveDisplay = isWhiteToMove
-    ? `...${position.lastMoveSan}`
-    : position.lastMoveSan;
-  const tierInfo = TIER_META[position.tier];
-
+  const lastMoveDisplay = isWhiteToMove ? `...${position.lastMoveSan}` : position.lastMoveSan;
+  const tierMeta = TIER_CONFIG[position.tier];
   const cardRingClass =
     feedbackOutcome === 'correct'
       ? 'ring-2 ring-emerald-400/80 shadow-emerald-500/10'
@@ -118,21 +76,18 @@ export function SwipeCard({
       style={{ x, rotate }}
       drag={disabled ? false : 'x'}
       dragConstraints={{ left: 0, right: 0 }}
-      dragElastic={0.82}
+      dragElastic={SWIPE_CONFIG.dragElastic}
       onDragEnd={handleDragEnd}
       whileTap={disabled ? undefined : { cursor: 'grabbing' }}
       className={`relative w-full rounded-2xl bg-slate-900/95 p-2.5 shadow-2xl transition-shadow select-none ${
         disabled ? 'cursor-default' : 'cursor-grab'
       } ${cardRingClass}`}
     >
-      {/* Compact Metadata Bar */}
       <div className="mb-2 flex items-center justify-between gap-2 px-0.5 text-xs">
         <div className="flex items-center gap-2 min-w-0">
           <span
             className={`inline-block h-3 w-3 shrink-0 rounded-full ring-2 ${
-              isWhiteToMove
-                ? 'bg-slate-100 ring-slate-400/60'
-                : 'bg-slate-950 ring-slate-400'
+              isWhiteToMove ? 'bg-slate-100 ring-slate-400/60' : 'bg-slate-950 ring-slate-400'
             }`}
             aria-hidden="true"
           />
@@ -151,57 +106,37 @@ export function SwipeCard({
             </span>
           )}
           {showTier && (
-            <span
-              className={`rounded-full px-2 py-0.5 text-[11px] font-semibold ring-1 ${tierInfo.className}`}
-            >
-              {tierInfo.label}
+            <span className={`rounded-full px-2 py-0.5 text-[11px] font-semibold ring-1 ${tierMeta.badgeClass}`}>
+              {tierMeta.label}
             </span>
           )}
-          <span className="text-[11px] font-medium text-slate-400">
-            ~{Math.round(position.avgElo)}
-          </span>
+          <span className="text-[11px] font-medium text-slate-400">~{Math.round(position.avgElo)}</span>
         </div>
       </div>
 
-      {/* Board + Swipe Overlays */}
       <div className="relative overflow-hidden rounded-xl">
-        <ChessBoard
+        <BoardView
           fen={displayFen}
-          orientation={orientation}
+          orientation={isWhiteToMove ? 'white' : 'black'}
           lastMove={displayLastMove}
           bestMoveArrow={bestMoveArrow}
         />
 
-        {/* Subtle directional glow */}
         {!disabled && (
           <>
-            <motion.div
-              style={{ opacity: rightGlowOpacity }}
-              className="pointer-events-none absolute inset-0 bg-emerald-500"
-            />
-            <motion.div
-              style={{ opacity: leftGlowOpacity }}
-              className="pointer-events-none absolute inset-0 bg-sky-500"
-            />
-
-            {/* ADVANTAGE Stamp (swipe right) */}
+            <motion.div style={{ opacity: rightGlowOpacity }} className="pointer-events-none absolute inset-0 bg-emerald-500" />
+            <motion.div style={{ opacity: leftGlowOpacity }} className="pointer-events-none absolute inset-0 bg-sky-500" />
             <motion.div
               style={{ opacity: advantageOpacity }}
               className="pointer-events-none absolute top-5 left-5 -rotate-12 rounded-xl border-[3px] border-emerald-400 bg-slate-950/85 px-3.5 py-1.5 shadow-lg backdrop-blur-sm"
             >
-              <span className="text-lg font-black tracking-wider text-emerald-400">
-                ADVANTAGE
-              </span>
+              <span className="text-lg font-black tracking-wider text-emerald-400">ADVANTAGE</span>
             </motion.div>
-
-            {/* EQUAL Stamp (swipe left) */}
             <motion.div
               style={{ opacity: equalOpacity }}
               className="pointer-events-none absolute top-5 right-5 rotate-12 rounded-xl border-[3px] border-sky-400 bg-slate-950/85 px-3.5 py-1.5 shadow-lg backdrop-blur-sm"
             >
-              <span className="text-lg font-black tracking-wider text-sky-400">
-                EQUAL
-              </span>
+              <span className="text-lg font-black tracking-wider text-sky-400">EQUAL</span>
             </motion.div>
           </>
         )}

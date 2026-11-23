@@ -1,3 +1,8 @@
+/**
+ * Shared contract between the offline Lichess ETL pipeline and the Blundr web app.
+ * Any schema change here updates both the exported dataset and frontend consumers.
+ */
+
 export type DifficultyTier = 1 | 2 | 3;
 
 export interface Position {

@@ -1,9 +1,12 @@
-import { useEffect, useState } from 'react';
+/**
+ * Completion card shown when a Practice difficulty's 5 daily tries are finished.
+ */
 import { ArrowRight, CheckCircle2, Clock, Sparkles } from 'lucide-react';
+import { ALL_TIERS, TIER_CONFIG } from '../config/constants';
+import { useMidnightCountdown } from '../hooks/useLocalDate';
 import type { DailyAnswer, DifficultyTier, Position } from '../types';
-import { formatCountdown, getMsUntilNextDay } from '../lib/daily';
 
-interface PracticeTierCompleteProps {
+interface TierCompleteProps {
   tier: DifficultyTier;
   positions: readonly Position[];
   answers: readonly DailyAnswer[];
@@ -12,42 +15,20 @@ interface PracticeTierCompleteProps {
   onGoToDaily: () => void;
 }
 
-const TIER_LABEL: Record<DifficultyTier, string> = {
-  1: 'Easy',
-  2: 'Medium',
-  3: 'Hard',
-};
-
-const TIER_ACCENT: Record<DifficultyTier, string> = {
-  1: 'text-emerald-400',
-  2: 'text-amber-400',
-  3: 'text-rose-400',
-};
-
-const ALL_TIERS: readonly DifficultyTier[] = [1, 2, 3];
-
-export function PracticeTierComplete({
+export function TierComplete({
   tier,
   positions,
   answers,
   remainingByTier,
   onSelectTier,
   onGoToDaily,
-}: PracticeTierCompleteProps) {
-  const [countdown, setCountdown] = useState<string>(() =>
-    formatCountdown(getMsUntilNextDay())
-  );
-
-  useEffect(() => {
-    const interval = window.setInterval(() => {
-      setCountdown(formatCountdown(getMsUntilNextDay()));
-    }, 1000);
-    return () => window.clearInterval(interval);
-  }, []);
+}: TierCompleteProps) {
+  const countdown = useMidnightCountdown();
+  const tierMeta = TIER_CONFIG[tier];
 
   const answerById = new Map(answers.map((a) => [a.positionId, a]));
-  const orderedResults = positions.map((p) => Boolean(answerById.get(p.id)?.correct));
-  const score = orderedResults.filter(Boolean).length;
+  const results = positions.map((p) => Boolean(answerById.get(p.id)?.correct));
+  const score = results.filter(Boolean).length;
   const total = positions.length;
 
   const otherAvailableTiers = ALL_TIERS.filter(
@@ -62,42 +43,33 @@ export function PracticeTierComplete({
         </div>
 
         <p
-          className={`mt-3 text-xs font-bold uppercase tracking-wider ${TIER_ACCENT[tier]}`}
+          className={`mt-3 text-xs font-bold uppercase tracking-wider ${tierMeta.accentTextClass}`}
         >
-          Practice · {TIER_LABEL[tier]} Complete
+          Practice · {tierMeta.label} Complete
         </p>
 
         <div className="mt-1 flex items-baseline justify-center gap-1">
-          <span className="text-4xl font-black tracking-tight text-slate-50">
-            {score}
-          </span>
+          <span className="text-4xl font-black tracking-tight text-slate-50">{score}</span>
           <span className="text-xl font-bold text-slate-500">/{total}</span>
         </div>
 
-        {/* Emoji result row */}
         <div
           className="mt-3 flex items-center justify-center gap-1.5 text-2xl"
-          aria-label={`${TIER_LABEL[tier]} score: ${score} out of ${total}`}
+          aria-label={`${tierMeta.label} score: ${score} out of ${total}`}
         >
-          {orderedResults.map((ok, idx) => (
+          {results.map((ok, idx) => (
             <span key={positions[idx]?.id ?? idx} aria-hidden="true">
               {ok ? '🟩' : '🟥'}
             </span>
           ))}
         </div>
 
-        {/* Midnight Reset Countdown */}
         <div className="mt-4 inline-flex items-center gap-2 rounded-xl bg-slate-950/80 px-3.5 py-2 ring-1 ring-slate-800/80">
           <Clock className="h-3.5 w-3.5 text-sky-400" />
-          <span className="text-xs font-medium text-slate-400">
-            Resets at midnight:
-          </span>
-          <span className="font-mono text-xs font-bold text-slate-100">
-            {countdown}
-          </span>
+          <span className="text-xs font-medium text-slate-400">Resets at midnight:</span>
+          <span className="font-mono text-xs font-bold text-slate-100">{countdown}</span>
         </div>
 
-        {/* Quick-Switch Buttons for Other Difficulties */}
         {otherAvailableTiers.length > 0 ? (
           <div className="mt-5 flex flex-col gap-2">
             {otherAvailableTiers.map((otherTier) => (
@@ -108,7 +80,7 @@ export function PracticeTierComplete({
                 className="inline-flex h-11 w-full items-center justify-between rounded-xl bg-sky-500/15 px-4 text-sm font-bold text-sky-200 ring-1 ring-sky-400/40 transition hover:bg-sky-500/25 active:scale-[0.98]"
               >
                 <span>
-                  Try {TIER_LABEL[otherTier]} ({remainingByTier[otherTier]} left)
+                  Try {TIER_CONFIG[otherTier].label} ({remainingByTier[otherTier]} left)
                 </span>
                 <ArrowRight className="h-4 w-4 text-sky-300" />
               </button>
@@ -117,8 +89,8 @@ export function PracticeTierComplete({
         ) : (
           <div className="mt-5 space-y-3">
             <p className="text-xs leading-relaxed text-slate-400">
-              You&apos;ve completed all Practice difficulties for today! Fresh
-              positions unlock at midnight.
+              You&apos;ve completed all Practice difficulties for today! Fresh positions
+              unlock at midnight.
             </p>
             <button
               type="button"

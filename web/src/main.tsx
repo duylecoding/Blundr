@@ -1,3 +1,6 @@
+/**
+ * Mounts the Blundr React root into the document shell.
+ */
 import { StrictMode } from 'react';
 import { createRoot } from 'react-dom/client';
 import './index.css';
