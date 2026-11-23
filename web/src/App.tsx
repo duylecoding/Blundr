@@ -131,7 +131,7 @@ export function App() {
             <main className="flex flex-1 flex-col justify-between gap-2 overflow-hidden px-3 pb-3 pt-0.5 min-h-0">
               <div className="flex flex-1 items-center justify-center min-h-0">
                 <div key={currentPosition.id} className={`mx-auto w-full animate-card-in ${cardCap}`}>
-                  <SwipeCard position={currentPosition} displayFen={displayed?.fen ?? currentPosition.fen} displayLastMove={displayed?.lastMove} bestMoveArrow={bestMoveArrow} disabled={isFeedbackOpen} slotLabel={active.slotLabel} showTier={mode === 'practice'} feedbackOutcome={feedbackOutcome} onSwipe={handleSwipe} />
+                  <SwipeCard position={currentPosition} displayFen={displayed?.fen ?? currentPosition.fen} displayLastMove={displayed?.lastMove} bestMoveArrow={bestMoveArrow} disabled={isFeedbackOpen} slotLabel={active.slotLabel} feedbackOutcome={feedbackOutcome} onSwipe={handleSwipe} />
                 </div>
               </div>
               <div className="shrink-0">

@@ -69,20 +69,21 @@ export function selectDailyPositions(
   const sorted = sortByCodeUnitId(positions);
   const shuffledFlags = buildAdvantageFlags(targetCount, DAILY_PUZZLE_COUNT, rng);
 
-  const tierPrefs: ReadonlyArray<readonly DifficultyTier[]> = [
-    [1, 2, 3],
-    rng() < 0.5 ? [1, 2, 3] : [2, 1, 3],
-    [2, 1, 3],
-    rng() < 0.5 ? [2, 3, 1] : [3, 2, 1],
-    [3, 2, 1],
-  ];
+  const tierRamp: readonly DifficultyTier[] =
+    rng() < 0.5 ? [1, 1, 2, 2, 3] : [1, 2, 2, 3, 3];
+  const tierFallbacks: Record<DifficultyTier, readonly DifficultyTier[]> = {
+    1: [1, 2, 3],
+    2: [2, 1, 3],
+    3: [3, 2, 1],
+  };
 
   const usedIds = new Set<string>();
   const selected: Position[] = [];
 
   for (let slot = 0; slot < targetCount; slot++) {
     const wantAdv = shuffledFlags[slot] ?? false;
-    const prefs = tierPrefs[slot] ?? [2, 1, 3];
+    const targetTier = tierRamp[slot] ?? 2;
+    const prefs = tierFallbacks[targetTier];
     let chosen: Position | undefined;
 
     for (const tier of prefs) {
@@ -107,7 +108,8 @@ export function selectDailyPositions(
     }
   }
 
-  return selected;
+  // Enforce non-decreasing difficulty even when sparse datasets trigger tier fallbacks.
+  return selected.sort((a, b) => a.tier - b.tier);
 }
 
 export function selectDailyPracticePositions(

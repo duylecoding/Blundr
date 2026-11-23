@@ -2,10 +2,10 @@
  * End-of-day Daily 5 results screen with Wordle share card, streak stats, and puzzle review.
  */
 import { useEffect, useRef, useState } from 'react';
-import { Check, Clock, Eye, Flame, Share2, Sparkles, Trophy } from 'lucide-react';
+import { Check, Clock, Eye, Flame, Link2, Share2, Sparkles, Trophy } from 'lucide-react';
 import { COPY_FEEDBACK_MS } from '../config/constants';
 import { formatEval } from '../domain/bestLine';
-import { buildShareText, copyTextToClipboard } from '../domain/share';
+import { buildShareText, copyTextToClipboard, shareSiteWithFriends } from '../domain/share';
 import { useMidnightCountdown } from '../hooks/useLocalDate';
 import type { DailyAnswer, DailyStreak, Position } from '../types';
 
@@ -27,15 +27,28 @@ export function DailyResults({
   onPlayPractice,
 }: DailyResultsProps) {
   const countdown = useMidnightCountdown();
-  const [copied, setCopied] = useState(false);
-  const copiedTimerRef = useRef<number | null>(null);
+  const [feedback, setFeedback] = useState<'results' | 'invite-copied' | 'invite-shared' | null>(
+    null
+  );
+  const timerRef = useRef<number | null>(null);
+  const isMountedRef = useRef(true);
 
   useEffect(
     () => () => {
-      if (copiedTimerRef.current !== null) window.clearTimeout(copiedTimerRef.current);
+      isMountedRef.current = false;
+      if (timerRef.current !== null) window.clearTimeout(timerRef.current);
     },
     []
   );
+
+  const showTempFeedback = (kind: 'results' | 'invite-copied' | 'invite-shared') => {
+    setFeedback(kind);
+    if (timerRef.current !== null) window.clearTimeout(timerRef.current);
+    timerRef.current = window.setTimeout(() => {
+      setFeedback(null);
+      timerRef.current = null;
+    }, COPY_FEEDBACK_MS);
+  };
 
   const answerById = new Map(answers.map((a) => [a.positionId, a]));
   const results = positions.map((p) => Boolean(answerById.get(p.id)?.correct));
@@ -44,13 +57,15 @@ export function DailyResults({
   const shareText = buildShareText(puzzleNumber, results, streak.currentStreak);
 
   const handleShare = async () => {
-    if (!(await copyTextToClipboard(shareText))) return;
-    setCopied(true);
-    if (copiedTimerRef.current !== null) window.clearTimeout(copiedTimerRef.current);
-    copiedTimerRef.current = window.setTimeout(() => {
-      setCopied(false);
-      copiedTimerRef.current = null;
-    }, COPY_FEEDBACK_MS);
+    const copied = await copyTextToClipboard(shareText);
+    if (!isMountedRef.current || !copied) return;
+    showTempFeedback('results');
+  };
+
+  const handleInvite = async () => {
+    const outcome = await shareSiteWithFriends();
+    if (!isMountedRef.current || outcome === 'failed') return;
+    showTempFeedback(outcome === 'shared' ? 'invite-shared' : 'invite-copied');
   };
 
   return (
@@ -97,7 +112,9 @@ export function DailyResults({
           <div className="rounded-xl bg-slate-950/70 px-2 py-2.5 ring-1 ring-slate-800/80">
             <div className="flex items-center justify-center gap-1 text-sky-400">
               <Clock className="h-3.5 w-3.5 shrink-0" />
-              <span className="font-mono text-sm font-bold text-slate-100">{countdown}</span>
+              <span className="font-mono text-xs sm:text-sm font-bold whitespace-nowrap tabular-nums text-slate-100">
+                {countdown}
+              </span>
             </div>
             <p className="mt-0.5 text-[10px] font-semibold uppercase tracking-wide text-slate-400">Next Daily</p>
           </div>
@@ -138,13 +155,29 @@ export function DailyResults({
       </div>
 
       <div className="flex flex-col gap-2">
-        <button
-          type="button"
-          onClick={handleShare}
-          className="inline-flex h-11 w-full items-center justify-center gap-2 rounded-xl bg-emerald-500 px-4 text-sm font-bold text-slate-950 shadow-lg shadow-emerald-500/20 transition hover:bg-emerald-400 active:scale-[0.98]"
-        >
-          {copied ? <><Check className="h-4 w-4" />Copied to Clipboard!</> : <><Share2 className="h-4 w-4" />Share Results</>}
-        </button>
+        <div className="flex gap-2">
+          <button
+            type="button"
+            onClick={() => void handleShare()}
+            className="inline-flex h-11 flex-1 items-center justify-center gap-2 rounded-xl bg-emerald-500 px-4 text-sm font-bold text-slate-950 shadow-lg shadow-emerald-500/20 transition hover:bg-emerald-400 active:scale-[0.98]"
+          >
+            {feedback === 'results' ? <><Check className="h-4 w-4" />Copied + Link!</> : <><Share2 className="h-4 w-4" />Share Results</>}
+          </button>
+          <button
+            type="button"
+            onClick={() => void handleInvite()}
+            title="Share Blundr link with a friend"
+            className="inline-flex h-11 shrink-0 items-center justify-center gap-1.5 rounded-xl bg-slate-800/90 px-3 text-xs font-semibold text-slate-200 ring-1 ring-slate-700 transition hover:bg-slate-700 active:scale-[0.98]"
+          >
+            {feedback === 'invite-shared' ? (
+              <><Check className="h-3.5 w-3.5 text-emerald-400" />Shared!</>
+            ) : feedback === 'invite-copied' ? (
+              <><Check className="h-3.5 w-3.5 text-emerald-400" />Link Copied</>
+            ) : (
+              <><Link2 className="h-3.5 w-3.5 text-emerald-400" />Invite Friend</>
+            )}
+          </button>
+        </div>
         <button
           type="button"
           onClick={onPlayPractice}

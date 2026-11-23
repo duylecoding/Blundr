@@ -14,7 +14,6 @@ interface SwipeCardProps {
   bestMoveArrow?: [string, string] | null;
   disabled: boolean;
   slotLabel: string | null;
-  showTier: boolean;
   feedbackOutcome: FeedbackOutcome;
   onSwipe: (guessedAdvantage: boolean) => void;
 }
@@ -26,7 +25,6 @@ export function SwipeCard({
   bestMoveArrow,
   disabled,
   slotLabel,
-  showTier,
   feedbackOutcome,
   onSwipe,
 }: SwipeCardProps) {
@@ -105,11 +103,9 @@ export function SwipeCard({
               {slotLabel}
             </span>
           )}
-          {showTier && (
-            <span className={`rounded-full px-2 py-0.5 text-[11px] font-semibold ring-1 ${tierMeta.badgeClass}`}>
-              {tierMeta.label}
-            </span>
-          )}
+          <span className={`rounded-full px-2 py-0.5 text-[11px] font-semibold ring-1 ${tierMeta.badgeClass}`}>
+            {tierMeta.label}
+          </span>
           <span className="text-[11px] font-medium text-slate-400">~{Math.round(position.avgElo)}</span>
         </div>
       </div>

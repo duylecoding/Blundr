@@ -1,7 +1,9 @@
 /**
- * Formats Wordle-style Daily 5 share cards and copies text with a DOM fallback.
+ * Formats Wordle-style Daily 5 share cards, handles native site sharing, and copies text with a DOM fallback.
  */
-import { APP_NAME } from '../config/constants';
+import { APP_NAME, APP_SHARE_TEXT, APP_SHARE_URL } from '../config/constants';
+
+export type ShareSiteOutcome = 'shared' | 'copied' | 'failed';
 
 export function buildShareText(
   puzzleNumber: number,
@@ -12,7 +14,7 @@ export function buildShareText(
   const total = results.length;
   const squares = results.map((ok) => (ok ? '🟩' : '🟥')).join('');
   const streakSuffix = streak > 0 ? ` 🔥${streak}` : '';
-  return `${APP_NAME} #${puzzleNumber} — ${score}/${total}${streakSuffix}\n${squares}`;
+  return `${APP_NAME} #${puzzleNumber} — ${score}/${total}${streakSuffix}\n${squares}\n${APP_SHARE_URL}`;
 }
 
 function fallbackCopyText(text: string): boolean {
@@ -49,4 +51,31 @@ export async function copyTextToClipboard(text: string): Promise<boolean> {
     }
   }
   return fallbackCopyText(text);
+}
+
+function isSuppressedShareError(error: unknown): boolean {
+  if (typeof error !== 'object' || error === null || !('name' in error)) {
+    return false;
+  }
+  const name = (error as { name: unknown }).name;
+  return name === 'AbortError' || name === 'InvalidStateError';
+}
+
+export async function shareSiteWithFriends(): Promise<ShareSiteOutcome> {
+  if (typeof navigator !== 'undefined' && typeof navigator.share === 'function') {
+    try {
+      await navigator.share({
+        title: APP_NAME,
+        text: APP_SHARE_TEXT,
+        url: APP_SHARE_URL,
+      });
+      return 'shared';
+    } catch (error) {
+      if (isSuppressedShareError(error)) {
+        return 'failed';
+      }
+      // Fall back to clipboard copy if native sharing fails unexpectedly.
+    }
+  }
+  return (await copyTextToClipboard(APP_SHARE_URL)) ? 'copied' : 'failed';
 }

@@ -5,6 +5,23 @@
 import type { DifficultyTier, Position } from '../types';
 
 export const APP_NAME = 'Blundr';
+export const APP_SHARE_URL = 'https://duylecoding.github.io/Blundr/';
+export const APP_SHARE_TEXT =
+  'Can you spot when your opponent actually blundered? Play Blundr:';
+
+export const ADVANTAGE_THRESHOLDS = {
+  crushingEval: 4.0,
+  winningEval: 2.0,
+  subtleEval: 1.0,
+  onlyMovePvGap: 2.0,
+  narrowTacticPvGap: 1.0,
+  evalBarCap: 6.0,
+  evalBarCenterPercent: 50,
+  evalBarMinPercent: 2,
+  evalBarMaxPercent: 98,
+  evalBarNeutralWidthPercent: 4,
+  evalBarMinFillWidthPercent: 3,
+} as const;
 
 export const DAILY_EPOCH_DATE_KEY = '2026-11-22';
 export const DAILY_PUZZLE_COUNT = 5;
@@ -57,6 +74,7 @@ export const BOARD_CONFIG = {
 
 export interface TierStyleMeta {
   label: string;
+  shortLabel: 'E' | 'M' | 'H';
   badgeClass: string;
   tabActiveClass: string;
   accentTextClass: string;
@@ -65,18 +83,21 @@ export interface TierStyleMeta {
 export const TIER_CONFIG: Record<DifficultyTier, TierStyleMeta> = {
   1: {
     label: 'Easy',
+    shortLabel: 'E',
     badgeClass: 'bg-emerald-500/15 text-emerald-300 ring-emerald-500/30',
     tabActiveClass: 'bg-emerald-500/20 text-emerald-300 ring-1 ring-emerald-400/50',
     accentTextClass: 'text-emerald-400',
   },
   2: {
     label: 'Medium',
+    shortLabel: 'M',
     badgeClass: 'bg-amber-500/15 text-amber-300 ring-amber-500/30',
     tabActiveClass: 'bg-amber-500/20 text-amber-300 ring-1 ring-amber-400/50',
     accentTextClass: 'text-amber-400',
   },
   3: {
     label: 'Hard',
+    shortLabel: 'H',
     badgeClass: 'bg-rose-500/15 text-rose-300 ring-rose-500/30',
     tabActiveClass: 'bg-rose-500/20 text-rose-300 ring-1 ring-rose-400/50',
     accentTextClass: 'text-rose-400',
@@ -105,8 +126,8 @@ export const LAYOUT_CAPS = {
   appMaxWidth: 'max-w-md md:max-w-[580px]',
   // Height-aware caps keep short mobile viewports unclipped and desktop cards balanced
   dailyCardCap:
-    'max-w-[min(100%,calc(100dvh-268px))] md:max-w-[min(520px,calc(100dvh-248px))]',
+    'max-w-[min(100%,calc(100dvh-312px))] md:max-w-[min(520px,calc(100dvh-296px))]',
   practiceCardCap:
-    'max-w-[min(100%,calc(100dvh-318px))] md:max-w-[min(520px,calc(100dvh-292px))]',
-  dockMinHeight: 'min-h-[146px]',
+    'max-w-[min(100%,calc(100dvh-356px))] md:max-w-[min(520px,calc(100dvh-340px))]',
+  dockMinHeight: 'min-h-[186px]',
 } as const;

@@ -102,6 +102,9 @@ export function useDailyMode(allPositions: readonly Position[], dateKey: string)
   const advance = useCallback(() => {
     if (inspectingIndex !== null) {
       setInspectingIndex(null);
+      if (!progress.completed) {
+        setIndex(findFirstUnansweredIndex(positions, progress.answers));
+      }
       return;
     }
     setJustAnswered(null);

@@ -3,11 +3,13 @@
  */
 import { beforeEach, describe, expect, it } from 'vitest';
 import {
+  APP_SHARE_URL,
   DAILY_EPOCH_DATE_KEY,
   DAILY_PUZZLE_COUNT,
   PRACTICE_DAILY_LIMIT,
   STORAGE_KEYS,
 } from '../config/constants';
+import { summarizePositionAdvantage } from '../domain/advantageSummary';
 import {
   buildBestLineStates,
   formatEval,
@@ -133,6 +135,21 @@ describe('deck.ts', () => {
       const advCount = picked.filter((p) => p.hasAdvantage).length;
       expect(picked).toHaveLength(5);
       expect(advCount === 2 || advCount === 3).toBe(true);
+      for (let i = 0; i < picked.length - 1; i++) {
+        expect(picked[i]!.tier).toBeLessThanOrEqual(picked[i + 1]!.tier);
+      }
+    }
+
+    // Sparse dataset forcing tier fallbacks still preserves non-decreasing difficulty
+    const sparse = [
+      ...dataset.filter((p) => p.tier === 3).slice(0, 3),
+      ...dataset.filter((p) => p.tier === 1).slice(0, 1),
+      ...dataset.filter((p) => p.tier === 2).slice(0, 1),
+    ];
+    const sparsePicked = selectDailyPositions(sparse, '2026-11-25');
+    expect(sparsePicked).toHaveLength(5);
+    for (let i = 0; i < sparsePicked.length - 1; i++) {
+      expect(sparsePicked[i]!.tier).toBeLessThanOrEqual(sparsePicked[i + 1]!.tier);
     }
   });
 
@@ -406,13 +423,131 @@ describe('validateDataset.ts', () => {
 });
 
 describe('share.ts', () => {
-  it('builds Wordle-style Blundr share cards with and without streak', () => {
+  it('builds Wordle-style Blundr share cards with site link, with and without streak', () => {
     expect(buildShareText(1, [true, true, false, true, true], 3)).toBe(
-      'Blundr #1 — 4/5 🔥3\n🟩🟩🟥🟩🟩'
+      `Blundr #1 — 4/5 🔥3\n🟩🟩🟥🟩🟩\n${APP_SHARE_URL}`
     );
     expect(buildShareText(12, [false, false, false, false, false], 0)).toBe(
-      'Blundr #12 — 0/5\n🟥🟥🟥🟥🟥'
+      `Blundr #12 — 0/5\n🟥🟥🟥🟥🟥\n${APP_SHARE_URL}`
     );
+  });
+});
+
+describe('advantageSummary.ts', () => {
+  const basePos = makeFixturePositions(1)[0]!;
+
+  it('summarizes forced mate, crushing only-move, narrow tactic, positional edge, null pvGap, and equal positions', () => {
+    const mateSummary = summarizePositionAdvantage(
+      { ...basePos, hasAdvantage: true, evalAfter: null, mateIn: 2, pvGap: null, style: 'tactical' },
+      'Qh7+'
+    );
+    expect(mateSummary).toEqual({
+      headline: 'Forced Mate in 2',
+      difficultyNote: 'Forced mate — starts with Qh7+',
+      evalBarPercent: 98,
+      fillLeftPercent: 50,
+      fillWidthPercent: 48,
+    });
+
+    const crushingSummary = summarizePositionAdvantage(
+      { ...basePos, hasAdvantage: true, evalAfter: 4.8, mateIn: null, pvGap: 3.1, style: 'tactical' },
+      'Nxf7'
+    );
+    expect(crushingSummary.headline).toBe('Crushing Edge (+4.8)');
+    expect(crushingSummary.difficultyNote).toBe('Only move! Nxf7 is +3.1 over 2nd best');
+    expect(crushingSummary.evalBarPercent).toBeGreaterThan(85);
+    expect(crushingSummary.evalBarPercent).toBeLessThanOrEqual(98);
+    expect(crushingSummary.fillLeftPercent).toBe(50);
+
+    const narrowSummary = summarizePositionAdvantage(
+      { ...basePos, hasAdvantage: true, evalAfter: 2.5, mateIn: null, pvGap: 1.4, style: 'tactical' },
+      'Bb5+'
+    );
+    expect(narrowSummary.headline).toBe('Winning Edge (+2.5)');
+    expect(narrowSummary.difficultyNote).toBe('Narrow tactic — Bb5+ beats 2nd best by +1.4');
+    expect(narrowSummary.evalBarPercent).toBe(70);
+    expect(narrowSummary.fillLeftPercent).toBe(50);
+    expect(narrowSummary.fillWidthPercent).toBe(20);
+
+    const positionalSummary = summarizePositionAdvantage(
+      { ...basePos, hasAdvantage: true, evalAfter: 1.3, mateIn: null, pvGap: 0.4, style: 'positional' },
+      'Rd1'
+    );
+    expect(positionalSummary.headline).toBe('Subtle Edge (+1.3)');
+    expect(positionalSummary.difficultyNote).toBe('Positional — multiple moves work (Rd1)');
+    expect(positionalSummary.evalBarPercent).toBeGreaterThan(50);
+
+    const missingGapSummary = summarizePositionAdvantage(
+      { ...basePos, hasAdvantage: true, evalAfter: 2.1, mateIn: null, pvGap: null, style: 'tactical' },
+      'Qc2'
+    );
+    expect(missingGapSummary.headline).toBe('Winning Edge (+2.1)');
+    expect(missingGapSummary.difficultyNote).toBe('Best move: Qc2');
+
+    const missingGapNoSan = summarizePositionAdvantage({
+      ...basePos,
+      hasAdvantage: true,
+      evalAfter: 2.1,
+      mateIn: null,
+      pvGap: null,
+      style: 'tactical',
+    });
+    expect(missingGapNoSan.difficultyNote).toBe('Winning line available');
+
+    const equalSummary = summarizePositionAdvantage(
+      { ...basePos, hasAdvantage: false, evalAfter: 0.02, mateIn: null, pvGap: 0.1, style: 'equal' },
+      'Nc6'
+    );
+    expect(equalSummary).toEqual({
+      headline: 'Dead Equal (0.0)',
+      difficultyNote: 'No forcing edge — position stays balanced',
+      evalBarPercent: 50,
+      fillLeftPercent: 48,
+      fillWidthPercent: 4,
+    });
+
+    // Small negative evals stay strictly <= 50% and never overshoot the center tick
+    const smallNegative = summarizePositionAdvantage({
+      ...basePos,
+      hasAdvantage: false,
+      evalAfter: -0.2,
+      mateIn: null,
+      style: 'equal',
+    });
+    expect(smallNegative.evalBarPercent).toBeLessThan(50);
+    expect(smallNegative.fillLeftPercent + smallNegative.fillWidthPercent).toBeLessThanOrEqual(50);
+
+    const largeNegative = summarizePositionAdvantage({
+      ...basePos,
+      hasAdvantage: false,
+      evalAfter: -7.5,
+      mateIn: null,
+      style: 'equal',
+    });
+    expect(largeNegative.evalBarPercent).toBe(2);
+    expect(largeNegative.fillLeftPercent).toBe(2);
+    expect(largeNegative.fillWidthPercent).toBe(48);
+
+    // Signed eval check and !hasAdvantage precedence prevent headline/note contradictions
+    const negativeFlaggedAdv = summarizePositionAdvantage({
+      ...basePos,
+      hasAdvantage: true,
+      evalAfter: -4.5,
+      mateIn: null,
+      pvGap: null,
+      style: 'tactical',
+    });
+    expect(negativeFlaggedAdv.headline).toBe('Subtle Edge (-4.5)');
+
+    const equalWithMateField = summarizePositionAdvantage({
+      ...basePos,
+      hasAdvantage: false,
+      evalAfter: 0.0,
+      mateIn: 2,
+      style: 'equal',
+    });
+    expect(equalWithMateField.headline).toContain('Dead Equal');
+    expect(equalWithMateField.difficultyNote).toBe('No forcing edge — position stays balanced');
   });
 });
 

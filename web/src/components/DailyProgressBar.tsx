@@ -1,6 +1,7 @@
 /**
- * Interactive 5-slot progress bar for Daily 5; clicking any answered slot jumps straight to its review.
+ * Interactive 5-slot progress bar for Daily 5 showing difficulty ramp (E/M/H) and jump-to-review.
  */
+import { TIER_CONFIG } from '../config/constants';
 import type { DailyAnswer, Position } from '../types';
 
 interface DailyProgressBarProps {
@@ -28,6 +29,7 @@ export function DailyProgressBar({
           const isCurrent = idx === activeIndex;
           const isPlayable = playableIndex !== null && idx === playableIndex;
           const canSelect = ans !== undefined || isPlayable;
+          const tierMeta = TIER_CONFIG[pos.tier];
 
           const barClass = ans
             ? ans.correct
@@ -45,6 +47,8 @@ export function DailyProgressBar({
               ? 'Current'
               : 'Locked';
 
+          const slotDescription = `Puzzle ${idx + 1} · ${tierMeta.label} (${statusLabel})`;
+
           return (
             <button
               key={pos.id}
@@ -52,26 +56,42 @@ export function DailyProgressBar({
               disabled={!canSelect}
               onClick={() => onSelectSlot(idx)}
               aria-current={isCurrent ? 'step' : undefined}
-              aria-label={`Puzzle ${idx + 1} (${statusLabel})`}
-              title={canSelect ? `Jump to puzzle ${idx + 1}` : undefined}
-              className={`group flex flex-1 items-center py-1.5 focus:outline-none ${
+              aria-label={slotDescription}
+              title={slotDescription}
+              className={`group flex flex-1 flex-col items-center gap-0.5 py-0.5 focus:outline-none ${
                 canSelect ? 'cursor-pointer' : 'cursor-default'
               }`}
             >
+              <span className="flex h-2 w-full items-center">
+                <span
+                  className={`block w-full rounded-full transition-all ${barClass} ${
+                    isCurrent
+                      ? 'h-2 ring-2 ring-slate-200/60'
+                      : canSelect
+                        ? 'h-1.5 group-hover:h-2 group-hover:brightness-125 group-focus-visible:ring-2 group-focus-visible:ring-slate-200/70'
+                        : 'h-1.5'
+                  }`}
+                />
+              </span>
               <span
-                className={`block h-1.5 w-full rounded-full transition-all ${barClass} ${
+                aria-hidden="true"
+                className={`text-[9px] font-bold leading-none tracking-wider ${
                   isCurrent
-                    ? 'h-2 ring-2 ring-slate-200/60'
-                    : canSelect
-                      ? 'group-hover:h-2 group-hover:brightness-125 group-focus-visible:ring-2 group-focus-visible:ring-slate-200/70'
-                      : ''
+                    ? tierMeta.accentTextClass
+                    : ans
+                      ? `${tierMeta.accentTextClass} opacity-75`
+                      : 'text-slate-500'
                 }`}
-              />
+              >
+                {tierMeta.shortLabel}
+              </span>
             </button>
           );
         })}
       </div>
-      <span className="text-[11px] font-semibold text-slate-400">#{puzzleNumber}</span>
+      <span className="shrink-0 text-[11px] font-semibold tabular-nums text-slate-400">
+        #{puzzleNumber}
+      </span>
     </div>
   );
 }
