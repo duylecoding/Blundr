@@ -3,9 +3,11 @@
 
 import * as path from 'node:path';
 import {
+  CLI_BOUNDS,
   DEFAULT_MIN_ELO,
   DEFAULT_OUT_PATH,
   DEFAULT_PER_TIER,
+  LICHESS_DATABASE_HOST,
   STOCKFISH_DEFAULTS,
 } from './constants.js';
 
@@ -20,13 +22,24 @@ export interface CliOptions {
   help: boolean;
 }
 
-function parsePositiveInt(flag: string, raw: string | undefined): number {
+const STRICT_DIGITS_RE = /^\d+$/;
+
+function parsePositiveInt(
+  flag: string,
+  raw: string | undefined,
+  bounds: { readonly min: number; readonly max: number }
+): number {
   if (raw === undefined) {
     throw new Error(`Missing value for ${flag}`);
   }
-  const parsed = Number.parseInt(raw, 10);
-  if (!Number.isFinite(parsed) || parsed <= 0) {
+  if (!STRICT_DIGITS_RE.test(raw)) {
     throw new Error(`Invalid positive integer for ${flag}: "${raw}"`);
+  }
+  const parsed = Number.parseInt(raw, 10);
+  if (!Number.isSafeInteger(parsed) || parsed < bounds.min || parsed > bounds.max) {
+    throw new Error(
+      `Value for ${flag} must be in ${bounds.min}..${bounds.max}, got "${raw}"`
+    );
   }
   return parsed;
 }
@@ -36,6 +49,19 @@ function requireValue(flag: string, raw: string | undefined): string {
     throw new Error(`Missing value for ${flag}`);
   }
   return raw;
+}
+
+export function validateLichessArchiveUrl(raw: string): string {
+  let parsed: URL;
+  try {
+    parsed = new URL(raw);
+  } catch {
+    throw new Error(`Invalid archive URL: "${raw}"`);
+  }
+  if (parsed.protocol !== 'https:' || parsed.hostname !== LICHESS_DATABASE_HOST) {
+    throw new Error(`Archive URL must use https://${LICHESS_DATABASE_HOST}: "${raw}"`);
+  }
+  return parsed.toString();
 }
 
 export function parseCliArgs(argv: readonly string[]): CliOptions {
@@ -58,16 +84,16 @@ export function parseCliArgs(argv: readonly string[]): CliOptions {
         opts.help = true;
         break;
       case '--min-elo':
-        opts.minElo = parsePositiveInt(arg, argv[++i]);
+        opts.minElo = parsePositiveInt(arg, argv[++i], CLI_BOUNDS.minElo);
         break;
       case '--per-tier':
-        opts.perTier = parsePositiveInt(arg, argv[++i]);
+        opts.perTier = parsePositiveInt(arg, argv[++i], CLI_BOUNDS.perTier);
         break;
       case '--depth':
-        opts.depth = parsePositiveInt(arg, argv[++i]);
+        opts.depth = parsePositiveInt(arg, argv[++i], CLI_BOUNDS.depth);
         break;
       case '--url':
-        opts.url = requireValue(arg, argv[++i]);
+        opts.url = validateLichessArchiveUrl(requireValue(arg, argv[++i]));
         break;
       case '--file':
         opts.file = path.resolve(process.cwd(), requireValue(arg, argv[++i]));

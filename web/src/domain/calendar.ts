@@ -11,7 +11,7 @@ export function getLocalDateKey(date: Date = new Date()): string {
 }
 
 // Parse as UTC midnight so DST transitions never cause off-by-one day arithmetic.
-function parseDateKeyUtcMs(dateKey: string): number {
+export function parseDateKeyUtcMs(dateKey: string): number {
   const parts = dateKey.split('-').map(Number);
   const year = parts[0] ?? 2026;
   const month = parts[1] ?? 1;

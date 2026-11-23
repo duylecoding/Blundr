@@ -7,12 +7,30 @@ import type { PieceSymbol } from 'chess.js';
 
 export const LICHESS_LIST_URL = 'https://database.lichess.org/standard/list.txt';
 export const LICHESS_BASE_URL = 'https://lichess.org';
+export const LICHESS_SITE_HOST = 'lichess.org';
+export const LICHESS_DATABASE_HOST = 'database.lichess.org';
 
 export const DEFAULT_MIN_ELO = 1800;
 export const DEFAULT_PER_TIER = 15;
 export const DEFAULT_SHUFFLE_SEED = 0x51a7e180;
 export const RAW_QUOTA_MULTIPLIER = 2;
 export const PROGRESS_LOG_INTERVAL = 2000;
+
+export const CLI_BOUNDS = {
+  minElo: { min: 100, max: 4000 },
+  perTier: { min: 1, max: 10_000 },
+  depth: { min: 1, max: 30 },
+} as const;
+
+export const MAX_PGN_LINE_BYTES = 64 * 1024;
+export const MAX_PGN_GAME_BYTES = 512 * 1024;
+export const MAX_DECOMPRESSED_BYTES = 2 * 1024 * 1024 * 1024;
+
+export const HTTP_LIMITS = {
+  listTimeoutMs: 30_000,
+  listMaxBytes: 1024 * 1024,
+  connectTimeoutMs: 30_000,
+} as const;
 
 export const MOVE_WINDOW = {
   min: 10,
@@ -56,6 +74,13 @@ export const STOCKFISH_DEFAULTS = {
   quitTimeoutMs: 2_000,
   mateEquivalentCp: 1000,
   maxPvLength: 4,
+} as const;
+
+export const STOCKFISH_BOUNDS = {
+  depth: { min: 1, max: 30 },
+  multiPv: { min: 1, max: 5 },
+  hashMb: { min: 1, max: 1024 },
+  timeoutMs: { min: 100, max: 120_000 },
 } as const;
 
 const THIS_DIR = path.dirname(fileURLToPath(import.meta.url));

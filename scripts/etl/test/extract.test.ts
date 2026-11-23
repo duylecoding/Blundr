@@ -1,6 +1,9 @@
 import assert from 'node:assert/strict';
+import { Readable } from 'node:stream';
 import { describe, it } from 'node:test';
+import * as zlib from 'node:zlib';
 import {
+  buildGameUrl,
   calculateMaterial,
   classifyBucket,
   extractCandidatesFromGame,
@@ -14,6 +17,8 @@ import {
 } from '../src/datasetBuilder.js';
 import { pickLatestLichessUrl } from '../src/extract.js';
 import {
+  createByteLimitTransform,
+  createZstdDecompressStream,
   extractEvalFromComment,
   normalizeEvalForSide,
   parseEvalToken,
@@ -21,6 +26,7 @@ import {
   passesFastPreFilter,
   streamPgnGames,
 } from '../src/pgnParser.js';
+import { StockfishAnalyzer } from '../src/stockfish.js';
 import {
   aggregateUciAnalysis,
   computePvGap,
@@ -633,6 +639,206 @@ describe('extract: CLI, style, URL picking, and dataset assembly', () => {
     assert.deepEqual(
       deterministicShuffle([1, 2, 3, 4, 5], 42),
       deterministicShuffle([1, 2, 3, 4, 5], 42)
+    );
+  });
+});
+
+describe('security hardening: URLs, UCI validation, PGN bounds, prototype safety, and CLI', () => {
+  it('buildGameUrl rejects non-Lichess/HTTP sites and emits canonical https://lichess.org/<id>#<ply>', () => {
+    assert.equal(
+      buildGameUrl('https://lichess.org/AbCdEf12', 'AbCdEf12', 21),
+      'https://lichess.org/AbCdEf12#21'
+    );
+    assert.equal(
+      buildGameUrl('https://lichess.org/game/IRImjKAF', 'IRImjKAF', 14),
+      'https://lichess.org/IRImjKAF#14'
+    );
+
+    // Reject HTTP, non-Lichess hosts, substring spoofing, javascript:, and invalid URLs
+    assert.equal(buildGameUrl('http://lichess.org/AbCdEf12', 'AbCdEf12', 21), null);
+    assert.equal(buildGameUrl('https://evil.com/AbCdEf12', 'AbCdEf12', 21), null);
+    assert.equal(buildGameUrl('https://evil.com/lichess.org/AbCdEf12', 'AbCdEf12', 21), null);
+    assert.equal(buildGameUrl('https://lichess.org.evil.com/AbCdEf12', 'AbCdEf12', 21), null);
+    assert.equal(buildGameUrl('javascript:alert(1)', 'AbCdEf12', 21), null);
+    assert.equal(buildGameUrl('not-a-url', 'AbCdEf12', 21), null);
+
+    const evilPgn = buildRuyLopezPgn({ site: 'http://evil.com/AbCdEf12' });
+    const parsedEvil = parsePgnGame(evilPgn);
+    assert.ok(parsedEvil);
+    assert.equal(extractCandidatesFromGame(parsedEvil, { minElo: 1800 }).length, 0);
+  });
+
+  it('StockfishAnalyzer rejects FENs with newlines/invalid format and out-of-range options', async () => {
+    assert.throws(() => new StockfishAnalyzer({ entrypoint: 'stub.js', hashMb: 0 }), RangeError);
+    assert.throws(() => new StockfishAnalyzer({ entrypoint: 'stub.js', hashMb: 2048 }), RangeError);
+    assert.throws(() => new StockfishAnalyzer({ entrypoint: 'stub.js', hashMb: 16.5 }), RangeError);
+    assert.throws(() => new StockfishAnalyzer({ entrypoint: 'stub.js', startupTimeoutMs: 50 }), RangeError);
+    assert.throws(() => new StockfishAnalyzer({ entrypoint: 'stub.js', startupTimeoutMs: 200_000 }), RangeError);
+
+    const analyzer = new StockfishAnalyzer({ entrypoint: 'stub.js' });
+    const validFen = 'rnbqkbnr/pppppppp/8/8/4P3/8/PPPP1PPP/RNBQKBNR b KQkq e3 0 1';
+
+    await assert.rejects(
+      analyzer.analyze(`${validFen}\nsetoption name Hash value 9999`),
+      /Invalid FEN/
+    );
+    await assert.rejects(analyzer.analyze(`${validFen}\rgo movetime 1`), /Invalid FEN/);
+    await assert.rejects(analyzer.analyze(`${validFen}\0`), /Invalid FEN/);
+    await assert.rejects(analyzer.analyze('not a valid fen'), /Invalid FEN/);
+    await assert.rejects(
+      analyzer.analyze('rnbqkbnr/pppppppp/8/8/4P3/8/PPPP1PPP/RNBQKBNR b  e3 0 1'),
+      /Invalid FEN/
+    );
+
+    await assert.rejects(analyzer.analyze(validFen, { depth: 0 }), RangeError);
+    await assert.rejects(analyzer.analyze(validFen, { depth: 31 }), RangeError);
+    await assert.rejects(analyzer.analyze(validFen, { multiPv: 0 }), RangeError);
+    await assert.rejects(analyzer.analyze(validFen, { multiPv: 6 }), RangeError);
+    await assert.rejects(analyzer.analyze(validFen, { timeoutMs: 99 }), RangeError);
+    await assert.rejects(analyzer.analyze(validFen, { timeoutMs: 120_001 }), RangeError);
+
+    await analyzer.close();
+  });
+
+  it('parsePgnGame uses null-prototype headers, ignores __proto__/constructor, and strips trailing !? linearly', () => {
+    const bangRun = '!'.repeat(50_000);
+    const pgn = [
+      '[Event "Rated Blitz game"]',
+      '[Site "https://lichess.org/Proto123"]',
+      '[__proto__ "polluted"]',
+      '[constructor "shadowed"]',
+      '[WhiteElo "1950"]',
+      '[BlackElo "1920"]',
+      '',
+      `1. e4!? { [%eval 0.20] } 1... e5${bangRun} { [%eval 0.25] } 2. Nf3?! Nc6!! 1-0`,
+    ].join('\n');
+
+    const started = performance.now();
+    const parsed = parsePgnGame(pgn);
+    const elapsedMs = performance.now() - started;
+
+    assert.ok(parsed);
+    assert.equal(Object.getPrototypeOf(parsed.headers), null);
+    assert.equal(parsed.headers['__proto__'], undefined);
+    assert.equal(parsed.headers['constructor'], undefined);
+    assert.equal(({} as Record<string, unknown>)['polluted'], undefined);
+    assert.deepEqual(
+      parsed.moves.map((m) => m.san),
+      ['e4', 'e5', 'Nf3', 'Nc6']
+    );
+    assert.ok(elapsedMs < 500, `Expected linear annotation stripping, took ${elapsedMs}ms`);
+  });
+
+  it('streamPgnGames skips oversized lines and games while yielding subsequent valid games', async () => {
+    const valid1 = buildRuyLopezPgn({ site: 'https://lichess.org/Valid001' });
+    const oversizedLineGame = [
+      '[Event "Oversized line game"]',
+      `[Site "https://lichess.org/BigLine1"]`,
+      `1. e4 { ${'x'.repeat(250)} } 1-0`,
+    ].join('\n');
+    const valid2 = [
+      '[Event "Small valid game"]',
+      '[Site "https://lichess.org/Valid002"]',
+      '[WhiteElo "1900"]',
+      '[BlackElo "1900"]',
+      '',
+      '1. e4 e5 1-0',
+    ].join('\n');
+
+    async function* lineTestStream(): AsyncGenerator<string> {
+      yield `${oversizedLineGame}\n\n${valid2}\n`;
+    }
+    const afterOversizedLine: string[] = [];
+    for await (const raw of streamPgnGames(lineTestStream(), { maxLineBytes: 120, maxGameBytes: 4096 })) {
+      afterOversizedLine.push(raw);
+    }
+    assert.equal(afterOversizedLine.length, 1);
+    assert.ok(afterOversizedLine[0]!.includes('Valid002'));
+
+    async function* gameTestStream(): AsyncGenerator<string> {
+      yield `${valid1}\n\n${valid2}\n`;
+    }
+    const afterOversizedGame: string[] = [];
+    for await (const raw of streamPgnGames(gameTestStream(), { maxLineBytes: 4096, maxGameBytes: 300 })) {
+      afterOversizedGame.push(raw);
+    }
+    assert.equal(afterOversizedGame.length, 1);
+    assert.ok(afterOversizedGame[0]!.includes('Valid002'));
+  });
+
+  it('createByteLimitTransform and createZstdDecompressStream enforce the decompressed byte ceiling', async () => {
+    const limiter = createByteLimitTransform(16);
+    const source = Readable.from([Buffer.alloc(10, 65), Buffer.alloc(10, 66)]);
+    source.pipe(limiter);
+
+    await assert.rejects(async () => {
+      for await (const _chunk of limiter) {
+        // consume stream until limit triggers
+      }
+    }, /exceeded limit of 16 bytes/);
+
+    const zlibWithZstd = zlib as unknown as { zstdCompressSync?: (buf: Buffer) => Buffer };
+    if (typeof zlibWithZstd.zstdCompressSync === 'function') {
+      const compressed = zlibWithZstd.zstdCompressSync(Buffer.alloc(1024, 65));
+      const zstdStream = createZstdDecompressStream(128);
+      Readable.from([compressed]).pipe(zstdStream);
+
+      await assert.rejects(async () => {
+        for await (const _chunk of zstdStream) {
+          // consume until zstd bomb limit triggers
+        }
+      }, /exceeded limit of 128 bytes/);
+    }
+  });
+
+  it('parseCliArgs rejects malformed integers, out-of-bounds values, HTTP URLs, and non-Lichess hosts', () => {
+    assert.throws(() => parseCliArgs(['--depth', '14abc']), /Invalid positive integer/);
+    assert.throws(() => parseCliArgs(['--min-elo', '99']), /must be in 100\.\.4000/);
+    assert.throws(() => parseCliArgs(['--min-elo', '4001']), /must be in 100\.\.4000/);
+    assert.throws(() => parseCliArgs(['--per-tier', '0']), /must be in 1\.\.10000/);
+    assert.throws(() => parseCliArgs(['--per-tier', '10001']), /must be in 1\.\.10000/);
+    assert.throws(() => parseCliArgs(['--depth', '31']), /must be in 1\.\.30/);
+    assert.throws(
+      () => parseCliArgs(['--url', 'http://database.lichess.org/standard/lichess_db_standard_rated_2026-02.pgn.zst']),
+      /https:\/\/database\.lichess\.org/
+    );
+    assert.throws(
+      () => parseCliArgs(['--url', 'https://evil.com/standard/lichess_db_standard_rated_2026-02.pgn.zst']),
+      /https:\/\/database\.lichess\.org/
+    );
+    assert.throws(
+      () => parseCliArgs(['--url', 'https://database.lichess.org.evil.com/a.pgn.zst']),
+      /https:\/\/database\.lichess\.org/
+    );
+
+    const validUrl = 'https://database.lichess.org/standard/lichess_db_standard_rated_2026-02.pgn.zst';
+    assert.equal(parseCliArgs(['--url', validUrl]).url, validUrl);
+  });
+
+  it('pickLatestLichessUrl rejects http:// and non-Lichess hosts', () => {
+    assert.throws(
+      () =>
+        pickLatestLichessUrl(
+          'http://database.lichess.org/standard/lichess_db_standard_rated_2026-02.pgn.zst'
+        ),
+      /No valid https:\/\/database\.lichess\.org/
+    );
+    assert.throws(
+      () =>
+        pickLatestLichessUrl(
+          'https://evil.com/standard/lichess_db_standard_rated_2026-02.pgn.zst'
+        ),
+      /No valid https:\/\/database\.lichess\.org/
+    );
+
+    const mixedList = [
+      'http://database.lichess.org/standard/lichess_db_standard_rated_2099-12.pgn.zst',
+      'https://evil.com/standard/lichess_db_standard_rated_2099-11.pgn.zst',
+      'https://database.lichess.org/standard/lichess_db_standard_rated_2026-02.pgn.zst',
+    ].join('\n');
+    assert.equal(
+      pickLatestLichessUrl(mixedList),
+      'https://database.lichess.org/standard/lichess_db_standard_rated_2026-02.pgn.zst'
     );
   });
 });

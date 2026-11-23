@@ -4,6 +4,7 @@
 import { ArrowRight, CheckCircle2, ExternalLink, RotateCcw, XCircle } from 'lucide-react';
 import { LAYOUT_CAPS, STYLE_BADGE_CONFIG } from '../config/constants';
 import { formatEval, type BestLineState } from '../domain/bestLine';
+import { getSafeGameUrl } from '../domain/validateDataset';
 import type { Position } from '../types';
 
 interface AnswerReviewProps {
@@ -51,6 +52,7 @@ export function AnswerReview({
 
   const canStepBack = lineIndex > 0;
   const canStepForward = lineIndex < totalMoves;
+  const safeGameUrl = getSafeGameUrl(position.gameUrl);
 
   return (
     <div
@@ -133,15 +135,17 @@ export function AnswerReview({
       </div>
 
       <div className="flex items-center gap-2">
-        <a
-          href={position.gameUrl}
-          target="_blank"
-          rel="noopener noreferrer"
-          className="inline-flex h-10 shrink-0 items-center justify-center gap-1.5 rounded-xl bg-slate-800 px-3 text-xs font-semibold text-slate-200 ring-1 ring-slate-700 transition hover:bg-slate-700"
-        >
-          Lichess
-          <ExternalLink className="h-3.5 w-3.5 text-slate-400" />
-        </a>
+        {safeGameUrl && (
+          <a
+            href={safeGameUrl}
+            target="_blank"
+            rel="noopener noreferrer"
+            className="inline-flex h-10 shrink-0 items-center justify-center gap-1.5 rounded-xl bg-slate-800 px-3 text-xs font-semibold text-slate-200 ring-1 ring-slate-700 transition hover:bg-slate-700"
+          >
+            Lichess
+            <ExternalLink className="h-3.5 w-3.5 text-slate-400" />
+          </a>
+        )}
         <button
           type="button"
           onClick={onNext}

@@ -10,7 +10,14 @@ import { fileURLToPath } from 'node:url';
 import type { Position, PositionDataset } from '../../../shared/types.js';
 import { extractCandidatesFromGame, type RawCandidate } from './candidateFilter.js';
 import { parseCliArgs, printHelp, type CliOptions } from './cli.js';
-import { LICHESS_LIST_URL, PROGRESS_LOG_INTERVAL, RAW_QUOTA_MULTIPLIER, STOCKFISH_DEFAULTS } from './constants.js';
+import {
+  HTTP_LIMITS,
+  LICHESS_DATABASE_HOST,
+  LICHESS_LIST_URL,
+  PROGRESS_LOG_INTERVAL,
+  RAW_QUOTA_MULTIPLIER,
+  STOCKFISH_DEFAULTS,
+} from './constants.js';
 import {
   BUCKET_KEYS, bucketKeyFor, buildDryRunBuckets, buildPositionDataset,
   createEmptyBuckets, createQuotas, verifyCandidateWithAnalysis,
@@ -20,10 +27,68 @@ import { createZstdDecompressStream, parsePgnGame, passesFastPreFilter, streamPg
 import { StockfishAnalyzer } from './stockfish.js';
 
 export function pickLatestLichessUrl(listText: string): string {
-  const urls = listText.split(/\r?\n/).map((l) => l.trim()).filter((l) => l.startsWith('http') && l.endsWith('.pgn.zst'));
-  if (urls.length === 0) throw new Error('No .pgn.zst URLs found in Lichess database list.');
+  const urls: string[] = [];
+  for (const rawLine of listText.split(/\r?\n/)) {
+    const trimmed = rawLine.trim();
+    if (trimmed.length === 0) continue;
+    let parsed: URL;
+    try {
+      parsed = new URL(trimmed);
+    } catch {
+      continue;
+    }
+    if (
+      parsed.protocol !== 'https:' ||
+      parsed.hostname !== LICHESS_DATABASE_HOST ||
+      !parsed.pathname.endsWith('.pgn.zst')
+    ) {
+      continue;
+    }
+    urls.push(parsed.toString());
+  }
+  if (urls.length === 0) {
+    throw new Error(`No valid https://${LICHESS_DATABASE_HOST} .pgn.zst URLs found in Lichess database list.`);
+  }
   const dateKey = (url: string): string => /(\d{4})-(\d{2})\.pgn\.zst$/.exec(url)?.slice(1, 3).join('-') ?? '';
   return [...urls].sort((a, b) => dateKey(b).localeCompare(dateKey(a)))[0]!;
+}
+
+async function fetchTextWithLimit(
+  url: string,
+  maxBytes: number,
+  timeoutMs: number
+): Promise<string> {
+  const res = await fetch(url, { signal: AbortSignal.timeout(timeoutMs) });
+  if (!res.ok) throw new Error(`Failed to fetch Lichess list (${res.status} ${res.statusText})`);
+
+  const contentLength = res.headers.get('content-length');
+  if (contentLength !== null) {
+    const declared = Number.parseInt(contentLength, 10);
+    if (Number.isFinite(declared) && declared > maxBytes) {
+      await res.body?.cancel();
+      throw new Error(`Lichess list response exceeds ${maxBytes} byte limit.`);
+    }
+  }
+  if (!res.body) throw new Error(`Empty response body from ${url}`);
+
+  const reader = res.body.getReader();
+  const chunks: Uint8Array[] = [];
+  let totalBytes = 0;
+  try {
+    while (true) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      totalBytes += value.byteLength;
+      if (totalBytes > maxBytes) {
+        await reader.cancel();
+        throw new Error(`Lichess list response exceeded ${maxBytes} byte limit.`);
+      }
+      chunks.push(value);
+    }
+  } finally {
+    reader.releaseLock();
+  }
+  return Buffer.concat(chunks, totalBytes).toString('utf-8');
 }
 
 async function openArchiveStream(
@@ -31,20 +96,52 @@ async function openArchiveStream(
   signal: AbortSignal
 ): Promise<{ byteStream: Readable; source: string; isZst: boolean }> {
   if (options.file) {
-    if (!fs.existsSync(options.file)) throw new Error(`Input file does not exist: ${options.file}`);
-    return { byteStream: fs.createReadStream(options.file), source: path.basename(options.file), isZst: options.file.toLowerCase().endsWith('.zst') };
+    let stats: fs.Stats;
+    try {
+      stats = fs.statSync(options.file);
+    } catch {
+      throw new Error(`Input file does not exist: ${options.file}`);
+    }
+    if (!stats.isFile()) {
+      throw new Error(`Input path is not a regular file: ${options.file}`);
+    }
+    return {
+      byteStream: fs.createReadStream(options.file),
+      source: path.basename(options.file),
+      isZst: options.file.toLowerCase().endsWith('.zst'),
+    };
   }
+
   let url = options.url;
   if (!url) {
     console.log(`[ETL] Fetching latest archive list from ${LICHESS_LIST_URL}...`);
-    const listRes = await fetch(LICHESS_LIST_URL);
-    if (!listRes.ok) throw new Error(`Failed to fetch Lichess list (${listRes.status} ${listRes.statusText})`);
-    url = pickLatestLichessUrl(await listRes.text());
+    const listText = await fetchTextWithLimit(
+      LICHESS_LIST_URL,
+      HTTP_LIMITS.listMaxBytes,
+      HTTP_LIMITS.listTimeoutMs
+    );
+    url = pickLatestLichessUrl(listText);
   }
+
   console.log(`[ETL] Streaming PGN archive: ${url}`);
-  const res = await fetch(url, { signal });
+  const connectController = new AbortController();
+  const connectTimer = setTimeout(() => {
+    connectController.abort(
+      new Error(`Timed out after ${HTTP_LIMITS.connectTimeoutMs}ms connecting to ${url}`)
+    );
+  }, HTTP_LIMITS.connectTimeoutMs);
+  let res: Response;
+  try {
+    res = await fetch(url, { signal: AbortSignal.any([signal, connectController.signal]) });
+  } finally {
+    clearTimeout(connectTimer);
+  }
   if (!res.ok || !res.body) throw new Error(`Failed to stream Lichess archive (${res.status} ${res.statusText})`);
-  return { byteStream: Readable.fromWeb(res.body as unknown as WebReadableStream<Uint8Array>), source: url, isZst: url.toLowerCase().endsWith('.zst') };
+  return {
+    byteStream: Readable.fromWeb(res.body as unknown as WebReadableStream<Uint8Array>),
+    source: url,
+    isZst: url.toLowerCase().endsWith('.zst'),
+  };
 }
 
 async function collectRawCandidates(options: CliOptions) {
@@ -160,7 +257,14 @@ export async function runExtract(argv: readonly string[]): Promise<PositionDatas
   const dataset = buildPositionDataset(verified, { source, minElo: options.minElo });
 
   await fsp.mkdir(path.dirname(options.out), { recursive: true });
-  await fsp.writeFile(options.out, `${JSON.stringify(dataset, null, 2)}\n`, 'utf-8');
+  const tmpPath = `${options.out}.tmp.${process.pid}`;
+  try {
+    await fsp.writeFile(tmpPath, `${JSON.stringify(dataset, null, 2)}\n`, 'utf-8');
+    await fsp.rename(tmpPath, options.out);
+  } catch (err) {
+    await fsp.rm(tmpPath, { force: true }).catch(() => {});
+    throw err;
+  }
 
   const elapsedSec = ((Date.now() - startedAt) / 1000).toFixed(1);
   console.log(`[ETL] Wrote ${dataset.counts.total} positions to ${options.out} in ${elapsedSec}s`);

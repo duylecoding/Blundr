@@ -3,7 +3,8 @@
  */
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { POSITIONS_DATA_PATH } from '../config/constants';
-import type { Position, PositionDataset } from '../types';
+import { parsePositionDataset } from '../domain/validateDataset';
+import type { Position } from '../types';
 
 export function usePositions() {
   const [positions, setPositions] = useState<Position[]>([]);
@@ -25,11 +26,8 @@ export function usePositions() {
       if (!response.ok) {
         throw new Error(`HTTP ${response.status} while loading ${POSITIONS_DATA_PATH}`);
       }
-      const data = (await response.json()) as Partial<PositionDataset>;
-      if (!data || !Array.isArray(data.positions) || data.positions.length === 0) {
-        throw new Error('Dataset contains no positions.');
-      }
-      setPositions(data.positions);
+      const data: unknown = await response.json();
+      setPositions(parsePositionDataset(data));
     } catch (err) {
       if (err instanceof DOMException && err.name === 'AbortError') {
         return;

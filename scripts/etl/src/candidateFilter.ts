@@ -4,7 +4,7 @@
 import { Chess, type Color, type PieceSymbol, type Square } from 'chess.js';
 import type { DifficultyTier } from '../../../shared/types.js';
 import {
-  DEFAULT_MIN_ELO, EVAL_THRESHOLDS, LICHESS_BASE_URL, MAX_CANDIDATES_PER_GAME,
+  DEFAULT_MIN_ELO, EVAL_THRESHOLDS, LICHESS_BASE_URL, LICHESS_SITE_HOST, MAX_CANDIDATES_PER_GAME,
   MAX_MATERIAL_IMBALANCE, MIN_NON_KING_MATERIAL, MIN_PLY_GAP, MOVE_WINDOW,
   PIECE_VALUES, TRIVIAL_CAPTURE_MIN_VALUE,
 } from './constants.js';
@@ -58,6 +58,7 @@ interface PreQualifiedPly {
 }
 
 const UCI_MOVE_RE = /^([a-h][1-8])([a-h][1-8])([qrbn])?$/;
+const SAFE_GAME_ID_RE = /^[A-Za-z0-9_-]{1,32}$/;
 
 function round2(value: number): number {
   const rounded = Math.round(value * 100) / 100;
@@ -122,14 +123,21 @@ export function classifyBucket(evalBefore: EvalScore, evalAfter: EvalScore): Can
   return null;
 }
 
-export function buildGameUrl(site: string, gameId: string, ply: number): string {
+export function buildGameUrl(site: string, gameId: string, ply: number): string | null {
   const trimmed = site.trim();
-  if (trimmed.includes('lichess.org/')) return `${LICHESS_BASE_URL}/${gameId}#${ply}`;
-  const base =
-    trimmed.startsWith('http://') || trimmed.startsWith('https://')
-      ? trimmed.replace(/#.*$/, '')
-      : `${LICHESS_BASE_URL}/${gameId}`;
-  return `${base}#${ply}`;
+  let parsed: URL;
+  try {
+    parsed = new URL(trimmed);
+  } catch {
+    return null;
+  }
+  if (parsed.protocol !== 'https:' || parsed.hostname !== LICHESS_SITE_HOST) {
+    return null;
+  }
+  if (!SAFE_GAME_ID_RE.test(gameId) || !Number.isInteger(ply) || ply < 1) {
+    return null;
+  }
+  return `${LICHESS_BASE_URL}/${gameId}#${ply}`;
 }
 
 function selectSpacedCandidates(
@@ -168,6 +176,7 @@ export function extractCandidatesFromGame(
   } = options;
 
   if (game.whiteElo < minElo || game.blackElo < minElo) return [];
+  if (!buildGameUrl(game.site, game.gameId, 1)) return [];
 
   // Pass 1: filter by move window and [%eval] before instantiating chess.js.
   const preQualified = new Map<number, PreQualifiedPly>();
@@ -216,6 +225,9 @@ export function extractCandidatesFromGame(
       continue;
     }
 
+    const gameUrl = buildGameUrl(game.site, game.gameId, move.ply);
+    if (!gameUrl) continue;
+
     qualifying.push({
       id: `lichess_${game.gameId}_ply${move.ply}`,
       fen,
@@ -231,7 +243,7 @@ export function extractCandidatesFromGame(
       moveNumber: move.moveNumber,
       ply: move.ply,
       avgElo: game.avgElo,
-      gameUrl: buildGameUrl(game.site, game.gameId, move.ply),
+      gameUrl,
     });
   }
 

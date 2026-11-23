@@ -4,6 +4,7 @@
 import { beforeEach, describe, expect, it } from 'vitest';
 import {
   DAILY_EPOCH_DATE_KEY,
+  DAILY_PUZZLE_COUNT,
   PRACTICE_DAILY_LIMIT,
   STORAGE_KEYS,
 } from '../config/constants';
@@ -39,6 +40,7 @@ import {
   updateDailyStreakOnComplete,
   type StorageLike,
 } from '../domain/storage';
+import { getSafeGameUrl, parsePositionDataset } from '../domain/validateDataset';
 import type { DifficultyTier, Position } from '../types';
 
 function createMemoryStorage(): StorageLike {
@@ -47,6 +49,10 @@ function createMemoryStorage(): StorageLike {
     getItem: (key) => map.get(key) ?? null,
     setItem: (key, value) => void map.set(key, value),
     removeItem: (key) => void map.delete(key),
+    get length() {
+      return map.size;
+    },
+    key: (index) => Array.from(map.keys())[index] ?? null,
   };
 }
 
@@ -275,6 +281,127 @@ describe('storage.ts', () => {
     expect(storage.getItem(`${STORAGE_KEYS.practiceDailyPrefix}${today}_t1`)).not.toBeNull();
     expect(loadPracticeDailyProgress(today, 2, storage).answers).toEqual([]);
     expect(loadPracticeDailyProgress('2026-11-23', 1, storage).answers).toEqual([]);
+  });
+
+  it('rejects negative, float, unsafe numbers, invalid streak dates, and over-limit daily answers', () => {
+    storage.setItem(
+      STORAGE_KEYS.dailyStreak,
+      JSON.stringify({
+        currentStreak: -3,
+        maxStreak: 4.5,
+        lastCompletedDateKey: '2026/11/22',
+      })
+    );
+    expect(loadDailyStreak(storage)).toEqual({
+      currentStreak: 0,
+      maxStreak: 0,
+      lastCompletedDateKey: null,
+    });
+
+    storage.setItem(
+      STORAGE_KEYS.practiceStats,
+      JSON.stringify({
+        correct: -1,
+        total: 3.14,
+        truePositives: Number.MAX_SAFE_INTEGER + 10,
+        trueNegatives: '5',
+        falsePositives: 2,
+        falseNegatives: null,
+        currentStreak: 1,
+        bestStreak: -9,
+      })
+    );
+    expect(loadPracticeStats(storage)).toEqual({
+      correct: 0,
+      total: 0,
+      truePositives: 0,
+      trueNegatives: 0,
+      falsePositives: 2,
+      falseNegatives: 0,
+      currentStreak: 1,
+      bestStreak: 0,
+    });
+
+    const oversized = Array.from({ length: DAILY_PUZZLE_COUNT + 4 }, (_, i) => ({
+      positionId: `p${i}`,
+      guessedAdvantage: true,
+      correct: true,
+    }));
+    storage.setItem(
+      `${STORAGE_KEYS.dailyProgressPrefix}2026-11-22`,
+      JSON.stringify({ dateKey: '2026-11-22', answers: oversized, completed: false })
+    );
+    const loaded = loadDailyProgress('2026-11-22', storage);
+    expect(loaded.answers).toHaveLength(DAILY_PUZZLE_COUNT);
+    expect(loaded.completed).toBe(true);
+  });
+
+  it('lazily prunes Daily and Practice keys older than 30 days on save without touching active keys', () => {
+    const expiredDaily = `${STORAGE_KEYS.dailyProgressPrefix}2026-10-20`;
+    const boundaryDaily = `${STORAGE_KEYS.dailyProgressPrefix}2026-10-23`;
+    const expiredPractice = `${STORAGE_KEYS.practiceDailyPrefix}2026-10-22_t2`;
+    const recentPractice = `${STORAGE_KEYS.practiceDailyPrefix}2026-11-10_t1`;
+    const unrelatedKey = 'other:app:pref';
+
+    storage.setItem(expiredDaily, JSON.stringify({ dateKey: '2026-10-20', answers: [], completed: true }));
+    storage.setItem(boundaryDaily, JSON.stringify({ dateKey: '2026-10-23', answers: [], completed: true }));
+    storage.setItem(expiredPractice, JSON.stringify({ dateKey: '2026-10-22', tier: 2, answers: [], completed: true }));
+    storage.setItem(recentPractice, JSON.stringify({ dateKey: '2026-11-10', tier: 1, answers: [], completed: false }));
+    storage.setItem(STORAGE_KEYS.dailyStreak, JSON.stringify({ currentStreak: 4, maxStreak: 7, lastCompletedDateKey: '2026-11-21' }));
+    storage.setItem(unrelatedKey, 'keep-me');
+
+    recordDailyAnswer(
+      '2026-11-22',
+      { positionId: 'p1', guessedAdvantage: true, correct: true },
+      DAILY_PUZZLE_COUNT,
+      storage
+    );
+
+    expect(storage.getItem(expiredDaily)).toBeNull();
+    expect(storage.getItem(expiredPractice)).toBeNull();
+    expect(storage.getItem(boundaryDaily)).not.toBeNull();
+    expect(storage.getItem(recentPractice)).not.toBeNull();
+    expect(storage.getItem(STORAGE_KEYS.dailyStreak)).not.toBeNull();
+    expect(storage.getItem(unrelatedKey)).toBe('keep-me');
+  });
+});
+
+describe('validateDataset.ts', () => {
+  it('validates Lichess HTTPS URLs strictly and rejects unsafe schemes or hosts', () => {
+    expect(getSafeGameUrl('https://lichess.org/AbCdEfGh#24')).toBe(
+      'https://lichess.org/AbCdEfGh#24'
+    );
+    expect(getSafeGameUrl('javascript:alert(1)')).toBeNull();
+    expect(getSafeGameUrl('http://lichess.org/AbCdEfGh#24')).toBeNull();
+    expect(getSafeGameUrl('https://evil.com/AbCdEfGh#24')).toBeNull();
+    expect(getSafeGameUrl('https://lichess.org.evil.com/AbCdEfGh')).toBeNull();
+    expect(getSafeGameUrl('https://user:pass@lichess.org/AbCdEfGh')).toBeNull();
+    expect(getSafeGameUrl('')).toBeNull();
+    expect(getSafeGameUrl(null)).toBeNull();
+  });
+
+  it('filters malformed and prototype-key entries and throws when zero valid positions remain', () => {
+    const validEntry = makeFixturePositions(1)[0]!;
+    const protoPolluted = JSON.parse(
+      `{"__proto__":{"polluted":true},${JSON.stringify(validEntry).slice(1)}`
+    ) as Record<string, unknown>;
+    const constructorEntry = { ...validEntry, constructor: { evil: true } };
+    const badUrlEntry = { ...validEntry, id: 'bad_url', gameUrl: 'javascript:alert(1)' };
+    const badNumberEntry = { ...validEntry, id: 'bad_num', evalBefore: Number.NaN };
+    const badTierEntry = { ...validEntry, id: 'bad_tier', tier: 4 };
+
+    const parsed = parsePositionDataset({
+      version: 1,
+      positions: [validEntry, protoPolluted, constructorEntry, badUrlEntry, badNumberEntry, badTierEntry],
+    });
+
+    expect(parsed).toEqual([validEntry]);
+    expect(() =>
+      parsePositionDataset({ version: 1, positions: [badUrlEntry, protoPolluted] })
+    ).toThrow(/no valid positions/i);
+    expect(() => parsePositionDataset({ version: 1, positions: [] })).toThrow(
+      /no valid positions/i
+    );
   });
 });
 

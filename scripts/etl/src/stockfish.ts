@@ -6,7 +6,7 @@ import * as fs from 'node:fs';
 import { createRequire } from 'node:module';
 import * as path from 'node:path';
 import * as readline from 'node:readline';
-import { STOCKFISH_DEFAULTS } from './constants.js';
+import { STOCKFISH_BOUNDS, STOCKFISH_DEFAULTS } from './constants.js';
 import {
   aggregateUciAnalysis,
   parseUciInfoLine,
@@ -29,6 +29,29 @@ export interface StockfishAnalyzerOptions {
 interface StockfishPackageJson {
   bin?: string | Record<string, string>;
   main?: string;
+}
+
+const STRICT_FEN_RE =
+  /^[1-8pnbrqkPNBRQK/]+ [wb] (?:-|(?=[KQkq])K?Q?k?q?) (?:-|[a-h][36]) \d+ \d+$/;
+const UCI_CONTROL_CHAR_RE = /[\r\n\0]/;
+
+function assertBoundedInt(
+  name: string,
+  value: number,
+  bounds: { readonly min: number; readonly max: number }
+): number {
+  if (!Number.isInteger(value) || value < bounds.min || value > bounds.max) {
+    throw new RangeError(
+      `Invalid Stockfish option "${name}": expected integer in ${bounds.min}..${bounds.max}, got ${value}`
+    );
+  }
+  return value;
+}
+
+function assertValidFen(fen: string): void {
+  if (!STRICT_FEN_RE.test(fen)) {
+    throw new Error(`Invalid FEN rejected before UCI dispatch: "${fen.slice(0, 80)}"`);
+  }
 }
 
 function findStockfishPackageDir(baseDir?: string): string | null {
@@ -113,9 +136,17 @@ export class StockfishAnalyzer {
   private closed = false;
 
   constructor(options: StockfishAnalyzerOptions = {}) {
+    this.hashMb = assertBoundedInt(
+      'hashMb',
+      options.hashMb ?? STOCKFISH_DEFAULTS.hashMb,
+      STOCKFISH_BOUNDS.hashMb
+    );
+    this.startupTimeoutMs = assertBoundedInt(
+      'startupTimeoutMs',
+      options.startupTimeoutMs ?? STOCKFISH_DEFAULTS.startupTimeoutMs,
+      STOCKFISH_BOUNDS.timeoutMs
+    );
     this.entrypoint = options.entrypoint ?? resolveStockfishEntrypoint();
-    this.hashMb = options.hashMb ?? STOCKFISH_DEFAULTS.hashMb;
-    this.startupTimeoutMs = options.startupTimeoutMs ?? STOCKFISH_DEFAULTS.startupTimeoutMs;
   }
 
   private async ensureInitialized(): Promise<void> {
@@ -161,7 +192,10 @@ export class StockfishAnalyzer {
   }
 
   private async startProcess(): Promise<void> {
-    const child = spawn(process.execPath, [this.entrypoint], { stdio: ['pipe', 'pipe', 'pipe'] });
+    const child = spawn(process.execPath, [this.entrypoint], {
+      stdio: ['pipe', 'pipe', 'pipe'],
+      shell: false,
+    });
     this.proc = child;
     child.stderr.on('data', (chunk: Buffer) => {
       this.stderrChunks.push(chunk.toString('utf-8'));
@@ -183,6 +217,9 @@ export class StockfishAnalyzer {
   }
 
   private send(command: string): void {
+    if (UCI_CONTROL_CHAR_RE.test(command)) {
+      throw new Error('Rejected UCI command containing control characters.');
+    }
     if (!this.proc || !this.proc.stdin.writable) throw new Error('Stockfish process is not running.');
     this.proc.stdin.write(`${command}\n`);
   }
@@ -215,10 +252,23 @@ export class StockfishAnalyzer {
     });
   }
 
-  public analyze(fen: string, options: AnalyzeOptions = {}): Promise<StockfishAnalysis> {
-    const depth = options.depth ?? STOCKFISH_DEFAULTS.depth;
-    const multiPv = options.multiPv ?? STOCKFISH_DEFAULTS.multiPv;
-    const timeoutMs = options.timeoutMs ?? STOCKFISH_DEFAULTS.searchTimeoutMs;
+  public async analyze(fen: string, options: AnalyzeOptions = {}): Promise<StockfishAnalysis> {
+    assertValidFen(fen);
+    const depth = assertBoundedInt(
+      'depth',
+      options.depth ?? STOCKFISH_DEFAULTS.depth,
+      STOCKFISH_BOUNDS.depth
+    );
+    const multiPv = assertBoundedInt(
+      'multiPv',
+      options.multiPv ?? STOCKFISH_DEFAULTS.multiPv,
+      STOCKFISH_BOUNDS.multiPv
+    );
+    const timeoutMs = assertBoundedInt(
+      'timeoutMs',
+      options.timeoutMs ?? STOCKFISH_DEFAULTS.searchTimeoutMs,
+      STOCKFISH_BOUNDS.timeoutMs
+    );
 
     const run = async (): Promise<StockfishAnalysis> => {
       await this.ensureInitialized();

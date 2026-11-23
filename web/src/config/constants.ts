@@ -17,6 +17,11 @@ export const COPY_FEEDBACK_MS = 2200;
 
 export const POSITIONS_DATA_PATH = 'data/positions.json';
 
+export const ALLOWED_GAME_URL_PROTOCOL = 'https:';
+export const ALLOWED_GAME_URL_HOST = 'lichess.org';
+export const DATE_KEY_PATTERN = /^\d{4}-\d{2}-\d{2}$/;
+export const STORAGE_RETENTION_DAYS = 30;
+
 export const ALL_TIERS: readonly DifficultyTier[] = [1, 2, 3];
 
 export const STORAGE_KEYS = {

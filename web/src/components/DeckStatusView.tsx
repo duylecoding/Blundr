@@ -2,7 +2,7 @@
  * Loading skeleton, dataset error screen, and empty-tier fallback states.
  */
 import { AlertTriangle, Loader2, RefreshCw } from 'lucide-react';
-import { LAYOUT_CAPS, POSITIONS_DATA_PATH } from '../config/constants';
+import { LAYOUT_CAPS } from '../config/constants';
 
 type DeckStatusViewProps =
   | { status: 'loading' }
@@ -45,8 +45,7 @@ export function DeckStatusView(props: DeckStatusViewProps) {
           <h2 className="mt-3 text-base font-bold text-slate-100">Dataset Unavailable</h2>
           <p className="mt-1.5 text-xs leading-relaxed text-slate-400">{props.message}</p>
           <p className="mt-2 text-[11px] text-slate-500">
-            Ensure <code className="text-slate-300">{POSITIONS_DATA_PATH}</code> is present
-            in <code className="text-slate-300">web/public/data/</code>.
+            Check your connection and try reloading the puzzle deck.
           </p>
           <button
             type="button"

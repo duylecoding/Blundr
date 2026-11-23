@@ -1,8 +1,18 @@
 // Streams and parses Lichess zstd PGN games into moves and [%eval] annotations without
 // instantiating chess.js, enabling fast Elo/eval pre-filtering on multi-GB archives.
 
-import type { Transform } from 'node:stream';
+import { Duplex, Transform, type TransformCallback } from 'node:stream';
 import * as zlib from 'node:zlib';
+import {
+  MAX_DECOMPRESSED_BYTES,
+  MAX_PGN_GAME_BYTES,
+  MAX_PGN_LINE_BYTES,
+} from './constants.js';
+
+export interface StreamPgnOptions {
+  maxLineBytes?: number;
+  maxGameBytes?: number;
+}
 
 export interface EvalScore {
   pawns: number | null;
@@ -39,66 +49,188 @@ const HEADER_LINE_RE = /^\[([A-Za-z0-9_]+)\s+"((?:\\.|[^"\\])*)"\]$/;
 const EVAL_COMMENT_RE = /\[%eval\s+([^\]]+)\]/;
 const RESULT_TOKENS = new Set(['1-0', '0-1', '1/2-1/2', '*']);
 const DELIMITERS = new Set([' ', '\t', '\r', '\n', '{', '}', '(', ')', ';']);
+const FORBIDDEN_HEADER_KEYS = new Set(['__proto__', 'constructor', 'prototype']);
 
 const normalizeZero = (value: number): number => (Object.is(value, -0) ? 0 : value);
 
-export function createZstdDecompressStream(): Transform {
+export function createByteLimitTransform(maxBytes: number = MAX_DECOMPRESSED_BYTES): Transform {
+  let totalBytes = 0;
+  return new Transform({
+    transform(
+      chunk: Buffer | Uint8Array | string,
+      encoding: BufferEncoding,
+      callback: TransformCallback
+    ): void {
+      const chunkBytes =
+        typeof chunk === 'string' ? Buffer.byteLength(chunk, encoding) : chunk.byteLength;
+      totalBytes += chunkBytes;
+      if (totalBytes > maxBytes) {
+        callback(new Error(`Decompressed stream exceeded limit of ${maxBytes} bytes.`));
+        return;
+      }
+      callback(null, chunk);
+    },
+  });
+}
+
+export function createZstdDecompressStream(
+  maxDecompressedBytes: number = MAX_DECOMPRESSED_BYTES
+): Duplex {
   const zlibMod = zlib as unknown as ZlibWithZstd;
   if (typeof zlibMod.createZstdDecompress !== 'function') {
     throw new Error(
       `zlib.createZstdDecompress is not available in Node ${process.version}. Node 22.15+ is required.`
     );
   }
-  return zlibMod.createZstdDecompress();
+  const zstd = zlibMod.createZstdDecompress();
+  const limiter = createByteLimitTransform(maxDecompressedBytes);
+  zstd.pipe(limiter);
+  zstd.on('error', (err: Error) => limiter.destroy(err));
+  limiter.on('close', () => {
+    if (!zstd.destroyed) zstd.destroy();
+  });
+  return Duplex.from({ writable: zstd, readable: limiter });
 }
 
 export async function* streamPgnGames(
-  stream: AsyncIterable<Uint8Array | string>
+  stream: AsyncIterable<Uint8Array | string>,
+  options: StreamPgnOptions = {}
 ): AsyncGenerator<string> {
+  const maxLineBytes = options.maxLineBytes ?? MAX_PGN_LINE_BYTES;
+  const maxGameBytes = options.maxGameBytes ?? MAX_PGN_GAME_BYTES;
   const decoder = new TextDecoder('utf-8', { fatal: false });
   let remainder = '';
+  let remainderBytes = 0;
+  let droppingOversizedLine = false;
   let currentLines: string[] = [];
+  let currentGameBytes = 0;
+  let droppingOversizedGame = false;
   let seenMoveText = false;
+
+  const dropCurrentGame = (): void => {
+    droppingOversizedGame = true;
+    currentLines = [];
+    currentGameBytes = 0;
+  };
 
   const pushLine = (rawLine: string): string | null => {
     const line = rawLine.endsWith('\r') ? rawLine.slice(0, -1) : rawLine;
     const trimmed = line.trim();
-    if (trimmed.length === 0) {
-      if (currentLines.length > 0) currentLines.push('');
+    const isHeader = trimmed.startsWith('[');
+
+    if (droppingOversizedGame) {
+      if (trimmed.length === 0) return null;
+      if (trimmed.startsWith('[Event ') || (seenMoveText && isHeader)) {
+        const lineBytes = Buffer.byteLength(line, 'utf-8');
+        if (lineBytes > maxGameBytes) return null;
+        droppingOversizedGame = false;
+        currentLines = [line];
+        currentGameBytes = lineBytes;
+        seenMoveText = false;
+        return null;
+      }
+      if (!isHeader) seenMoveText = true;
       return null;
     }
 
-    const isHeader = trimmed.startsWith('[');
+    if (trimmed.length === 0) {
+      if (currentLines.length > 0) {
+        currentGameBytes += 1;
+        if (currentGameBytes > maxGameBytes) dropCurrentGame();
+        else currentLines.push('');
+      }
+      return null;
+    }
+
     if (currentLines.length > 0 && (trimmed.startsWith('[Event ') || (seenMoveText && isHeader))) {
       const completed = currentLines.join('\n').trim();
-      currentLines = [line];
-      seenMoveText = false;
+      const lineBytes = Buffer.byteLength(line, 'utf-8');
+      if (lineBytes > maxGameBytes) {
+        dropCurrentGame();
+        seenMoveText = false;
+      } else {
+        currentLines = [line];
+        currentGameBytes = lineBytes;
+        seenMoveText = false;
+      }
       return completed.length > 0 ? completed : null;
+    }
+
+    const addedBytes = Buffer.byteLength(line, 'utf-8') + (currentLines.length > 0 ? 1 : 0);
+    if (currentGameBytes + addedBytes > maxGameBytes) {
+      dropCurrentGame();
+      if (!isHeader) seenMoveText = true;
+      return null;
     }
 
     if (!isHeader) seenMoveText = true;
     currentLines.push(line);
+    currentGameBytes += addedBytes;
     return null;
   };
 
-  for await (const chunk of stream) {
-    const text = typeof chunk === 'string' ? chunk : decoder.decode(chunk, { stream: true });
-    if (text.length === 0) continue;
-    const lines = (remainder + text).split('\n');
-    remainder = lines.pop() ?? '';
-    for (const line of lines) {
+  function* consumeText(text: string): Generator<string> {
+    let offset = 0;
+    while (offset < text.length) {
+      const nlIdx = text.indexOf('\n', offset);
+      if (nlIdx === -1) {
+        const segment = text.slice(offset);
+        if (!droppingOversizedLine) {
+          const segBytes = Buffer.byteLength(segment, 'utf-8');
+          if (remainderBytes + segBytes > maxLineBytes) {
+            remainder = '';
+            remainderBytes = 0;
+            droppingOversizedLine = true;
+            dropCurrentGame();
+          } else {
+            remainder += segment;
+            remainderBytes += segBytes;
+          }
+        }
+        break;
+      }
+
+      const segment = text.slice(offset, nlIdx);
+      offset = nlIdx + 1;
+
+      if (droppingOversizedLine) {
+        droppingOversizedLine = false;
+        continue;
+      }
+
+      const segBytes = Buffer.byteLength(segment, 'utf-8');
+      if (remainderBytes + segBytes > maxLineBytes) {
+        remainder = '';
+        remainderBytes = 0;
+        dropCurrentGame();
+        continue;
+      }
+
+      const line = remainder.length > 0 ? remainder + segment : segment;
+      remainder = '';
+      remainderBytes = 0;
       const game = pushLine(line);
       if (game !== null) yield game;
     }
   }
 
-  for (const line of (remainder + decoder.decode()).split('\n')) {
-    const game = pushLine(line);
+  for await (const chunk of stream) {
+    const text = typeof chunk === 'string' ? chunk : decoder.decode(chunk, { stream: true });
+    if (text.length === 0) continue;
+    yield* consumeText(text);
+  }
+
+  const tail = decoder.decode();
+  if (tail.length > 0) yield* consumeText(tail);
+  if (!droppingOversizedLine && remainder.length > 0) {
+    const game = pushLine(remainder);
     if (game !== null) yield game;
   }
 
-  const lastGame = currentLines.join('\n').trim();
-  if (lastGame.length > 0) yield lastGame;
+  if (!droppingOversizedGame) {
+    const lastGame = currentLines.join('\n').trim();
+    if (lastGame.length > 0) yield lastGame;
+  }
 }
 
 export function passesFastPreFilter(rawGame: string, minElo: number): boolean {
@@ -152,6 +284,16 @@ function extractGameId(site: string): string {
   return sanitized.length > 0 ? sanitized : 'unknown';
 }
 
+function stripTrailingAnnotations(token: string): string {
+  let end = token.length;
+  while (end > 0) {
+    const ch = token[end - 1];
+    if (ch !== '!' && ch !== '?') break;
+    end -= 1;
+  }
+  return end === token.length ? token : token.slice(0, end);
+}
+
 function parseMovetext(movetext: string): ParsedMove[] {
   const moves: ParsedMove[] = [];
   let i = 0;
@@ -184,8 +326,8 @@ function parseMovetext(movetext: string): ParsedMove[] {
     if (rawToken.length === 0 || rawToken.startsWith('$')) continue;
     if (RESULT_TOKENS.has(rawToken)) break;
 
-    // Strip leading move numbers ("12.", "12...", "1.e4") and standalone "..." tokens.
-    const san = rawToken.replace(/^(?:\d+\.+|\.+)/, '').replace(/[!?]+$/, '');
+    // Strip leading move numbers ("12.", "12...", "1.e4") and trailing "!?" annotations linearly.
+    const san = stripTrailingAnnotations(rawToken.replace(/^(?:\d+\.+|\.+)/, ''));
     if (san.length === 0 || RESULT_TOKENS.has(san)) continue;
 
     const ply = moves.length + 1;
@@ -195,7 +337,7 @@ function parseMovetext(movetext: string): ParsedMove[] {
 }
 
 export function parsePgnGame(rawGame: string): ParsedGame | null {
-  const headers: Record<string, string> = {};
+  const headers: Record<string, string> = Object.create(null) as Record<string, string>;
   const movetextLines: string[] = [];
   let inMoveText = false;
 
@@ -203,7 +345,9 @@ export function parsePgnGame(rawGame: string): ParsedGame | null {
     const trimmed = rawLine.trim();
     if (!inMoveText && trimmed.startsWith('[')) {
       const match = HEADER_LINE_RE.exec(trimmed);
-      if (match?.[1] && match[2] !== undefined) headers[match[1]] = match[2].replace(/\\"/g, '"');
+      if (match?.[1] && match[2] !== undefined && !FORBIDDEN_HEADER_KEYS.has(match[1])) {
+        headers[match[1]] = match[2].replace(/\\"/g, '"');
+      }
       continue;
     }
     if (!inMoveText && trimmed.length === 0) continue;
