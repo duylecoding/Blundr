@@ -1,0 +1,47 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" width="512" height="512">
+  <defs>
+    <linearGradient id="bg512" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0%" stop-color="#0f172a" />
+      <stop offset="100%" stop-color="#0b1120" />
+    </linearGradient>
+    <linearGradient id="card512" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0%" stop-color="#1e293b" />
+      <stop offset="100%" stop-color="#111827" />
+    </linearGradient>
+    <linearGradient id="accent512" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0%" stop-color="#34d399" />
+      <stop offset="100%" stop-color="#10b981" />
+    </linearGradient>
+  </defs>
+  <rect width="512" height="512" rx="108" fill="url(#bg512)" />
+  <!-- Tilted back swipe card -->
+  <rect x="76" y="92" width="282" height="340" rx="46" fill="#1e293b" stroke="#38bdf8" stroke-opacity="0.45" stroke-width="8" transform="rotate(-8 217 262)" />
+  <!-- Foreground swipe card -->
+  <rect x="122" y="80" width="298" height="356" rx="52" fill="url(#card512)" stroke="#334155" stroke-width="8" transform="rotate(4 271 258)" />
+  <!-- Chessboard texture -->
+  <g transform="rotate(4 271 258)" opacity="0.16">
+    <rect x="170" y="128" width="64" height="64" rx="8" fill="#94a3b8" />
+    <rect x="298" y="128" width="64" height="64" rx="8" fill="#94a3b8" />
+    <rect x="234" y="192" width="64" height="64" rx="8" fill="#94a3b8" />
+    <rect x="170" y="256" width="64" height="64" rx="8" fill="#94a3b8" />
+    <rect x="298" y="256" width="64" height="64" rx="8" fill="#94a3b8" />
+  </g>
+  <!-- Stylized chess knight -->
+  <g transform="rotate(4 271 258)">
+    <path
+      d="M208 362h128v-26H208v26zm16-36h96c3-35-10-62-29-83 16-8 27-19 32-35l-24-13c-8-22-27-40-51-45l-5-19-22 16c-27 8-48 32-56 61l35 14 16-14c5 11 3 30-13 43-19 16-30 37-30 75h27z"
+      fill="#f8fafc"
+    />
+    <circle cx="250" cy="186" r="8" fill="#0b1120" />
+  </g>
+  <!-- Emerald swipe-right badge -->
+  <circle cx="388" cy="384" r="68" fill="url(#accent512)" stroke="#0b1120" stroke-width="14" />
+  <path
+    d="M364 384h44m-17-19 19 19-19 19"
+    fill="none"
+    stroke="#0b1120"
+    stroke-width="12"
+    stroke-linecap="round"
+    stroke-linejoin="round"
+  />
+</svg>

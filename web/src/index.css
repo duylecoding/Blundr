@@ -1,0 +1,108 @@
+@import 'chessground/assets/chessground.base.css';
+@import 'chessground/assets/chessground.brown.css';
+@import 'chessground/assets/chessground.cburnett.css';
+
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@layer base {
+  html,
+  body,
+  #root {
+    height: 100%;
+    height: 100dvh;
+    overflow: hidden;
+    overscroll-behavior: none;
+    background-color: #0b1120;
+    color: #f1f5f9;
+    -webkit-tap-highlight-color: transparent;
+  }
+
+  body {
+    font-family:
+      'Inter',
+      system-ui,
+      -apple-system,
+      BlinkMacSystemFont,
+      'Segoe UI',
+      Roboto,
+      sans-serif;
+  }
+}
+
+/* Crisp card entrance without scale() so chessground never measures a scaled box */
+@keyframes cardIn {
+  from {
+    opacity: 0;
+    transform: translateY(8px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+.animate-card-in {
+  animation: cardIn 140ms ease-out both;
+}
+
+/* Chessground container polish for mobile swipe cards */
+.chess-board-wrap {
+  position: relative;
+  width: 100%;
+  aspect-ratio: 1 / 1;
+  user-select: none;
+  -webkit-user-select: none;
+}
+
+.chess-board-wrap .cg-wrap {
+  border-radius: 0.75rem;
+  overflow: hidden;
+  box-shadow: inset 0 0 0 1px rgba(148, 163, 184, 0.14);
+}
+
+/* Let horizontal swipe gestures pass cleanly to Framer Motion while keeping board sharp */
+.chess-board-wrap,
+.chess-board-wrap .cg-wrap,
+.chess-board-wrap cg-board {
+  touch-action: none;
+}
+
+/* Subtle custom last-move highlight that stands out clearly */
+.chess-board-wrap cg-board square.last-move {
+  background-color: rgba(250, 204, 21, 0.36);
+}
+
+/* Crisp coordinates placed cleanly inside corner squares with zero clipping */
+.chess-board-wrap .cg-wrap coords {
+  font-weight: 700;
+  font-size: 10px;
+  opacity: 0.88;
+}
+
+.chess-board-wrap .cg-wrap coords.ranks {
+  top: 0;
+  left: 3px;
+  height: 100%;
+  width: 12px;
+}
+
+.chess-board-wrap .cg-wrap coords.ranks coord {
+  transform: none;
+  display: flex;
+  align-items: flex-start;
+  padding-top: 2px;
+}
+
+.chess-board-wrap .cg-wrap coords.files {
+  bottom: 1px;
+  left: 0;
+  width: 100%;
+  height: 14px;
+  text-align: right;
+}
+
+.chess-board-wrap .cg-wrap coords.files coord {
+  padding-right: 3px;
+}

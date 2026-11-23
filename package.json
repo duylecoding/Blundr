@@ -1,0 +1,14 @@
+{
+  "name": "blundr",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Swipe-based chess advantage detection trainer with Wordle-style Daily 5 mode and Lichess 1800+ ETL pipeline",
+  "scripts": {
+    "dev": "npm --prefix web run dev",
+    "build": "npm --prefix web run build",
+    "test:web": "npm --prefix web run test",
+    "test:etl": "npm --prefix scripts/etl run test",
+    "test": "npm run test:etl && npm run test:web",
+    "etl": "npm --prefix scripts/etl run extract"
+  }
+}
